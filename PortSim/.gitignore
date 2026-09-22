@@ -1,0 +1,48 @@
+# Unreal-generated output (project and source plugins)
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+
+# IDE-generated files; keep .vsconfig as shared toolchain configuration
+.vs/
+.vscode/
+.idea/
+*.sln
+*.suo
+*.user
+*.userosscache
+*.sdf
+*.opensdf
+*.VC.db
+*.VC.opendb
+*.code-workspace
+
+# Native compiler output
+*.obj
+*.o
+*.pch
+*.pdb
+*.ilk
+*.exp
+
+# Local logs, caches, and operating-system metadata
+*.log
+__pycache__/
+*.py[cod]
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Personal Unreal content and collections
+/Content/Developers/
+/Content/Collections/
+
+# Local credentials (keep distributable examples)
+.env
+.env.*
+!.env.example
+!.env.template
+
+# Keep Config/*.ini, *.json, Source/, Content/, Build/ and source Plugins/.
+# They may contain required settings, assets, packaging resources and plugin code.

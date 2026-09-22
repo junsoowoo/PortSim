@@ -1,0 +1,17 @@
+# Normalize text; never apply text conversion to Unreal/model binaries.
+* text=auto
+*.uasset binary
+*.umap binary
+*.ubulk binary
+*.uexp binary
+*.glb binary
+*.fbx binary
+*.blend binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.tga binary
+*.exr binary
+*.wav binary
+*.mp3 binary
+*.pdf binary
