@@ -36,6 +36,8 @@ public:
 private:
     UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> Legs;
     UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> Beams;
+    UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> Bogies;
+    UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> CrossBeams;
     UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> Ropes;
     UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> Pads;
     UPROPERTY() TObjectPtr<UStaticMeshComponent> Trolley;

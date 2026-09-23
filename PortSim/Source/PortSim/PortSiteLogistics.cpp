@@ -158,6 +158,8 @@ void APortSiteLogistics::Advance(float Dt,bool Paused)
             Cargo->GetBody()->SetSimulatePhysics(false);
             Cargo->AttachToComponent(Vehicle->GetRootComponent(),FAttachmentTransformRules::KeepWorldTransform);
             Cargo->LocationOwner=ECargoOwner::AGV;
+            Manifest[Job.Cargo].HandoverMask|=1;
+            UE_LOG(LogTemp,Display,TEXT("SITE_HANDOVER: C%d STS -> AGV%d"),Manifest[Job.Cargo].ID,100+Lane);
             PrepareRoute(Lane,false); Job.Stage=2; break;
         case 2:
             if (!Drive(Lane,Dt)) break;
@@ -167,16 +169,22 @@ void APortSiteLogistics::Advance(float Dt,bool Paused)
             Cargo->GetBody()->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
             if (!Equipment[Job.RMG]->AssignCargo(Cargo,Vehicle->CargoPosition(),Yard[Job.Slot].Position,false,true))
             { Stop(TEXT("AGV / RMG reservation handover")); return; }
+            Manifest[Job.Cargo].HandoverMask|=2;
+            UE_LOG(LogTemp,Display,TEXT("SITE_HANDOVER: C%d AGV%d -> RMG%d"),Manifest[Job.Cargo].ID,100+Lane,Job.RMG+1);
             Job.Stage=3; break;
         case 3:
             if (Equipment[Job.RMG]->IsBusy()) break;
             if (!Cargo || Cargo->LocationOwner!=ECargoOwner::Yard || !Cargo->GetActorLocation().Equals(Yard[Job.Slot].Position,10.f))
             { Stop(TEXT("RMG yard placement mismatch")); return; }
             Yard[Job.Slot].Occupied=true;
-            Yard[Job.Slot].Mesh->UpdateInstanceTransform(Yard[Job.Slot].Instance,SiteLogistics::YardTransform(Yard[Job.Slot].Position),false,true,true);
+            // Keep the same delivered actor and ID; do not replace it with a visual instance.
+            Cargo->GetBody()->SetSimulatePhysics(false);
+            Cargo->SetActorLocation(Yard[Job.Slot].Position);
+            PlacedContainers.Add(Cargo);
+            Manifest[Job.Cargo].HandoverMask|=4;
             Manifest[Job.Cargo].State=2; ++Delivered; ++Vehicle->CompletedJobs;
             UE_LOG(LogTemp,Display,TEXT("SITE_DELIVERED: C%d via AGV%d -> RMG%d; total=%d"),Manifest[Job.Cargo].ID,100+Lane,Job.RMG+1,Delivered);
-            Cargo->Destroy(); Job.Actor=nullptr;
+            Job.Actor=nullptr;
             PrepareRoute(Lane,true); Job.Stage=5; break;
         case 5:
             if (!Drive(Lane,Dt)) break;
@@ -191,9 +199,11 @@ void APortSiteLogistics::ResetLogistics()
 {
     if (!bReady) return;
     for (auto& Job:Jobs) if (Job.Actor.IsValid()) { Job.Actor->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform); Job.Actor->Destroy(); }
+    for (const auto& Cargo:PlacedContainers) if (IsValid(Cargo)) Cargo->Destroy();
+    PlacedContainers.Reset();
     for (const auto& Crane:Equipment) Crane->ResetOperation();
     for (auto& Cargo:Manifest)
-    { Cargo.State=0; Cargo.Mesh->UpdateInstanceTransform(Cargo.Instance,Cargo.Transform,false,true,true); }
+    { Cargo.State=0; Cargo.HandoverMask=0; Cargo.Mesh->UpdateInstanceTransform(Cargo.Instance,Cargo.Transform,false,true,true); }
     for (auto& Slot:Yard) if (Slot.Reserved)
     { Slot.Occupied=false; Slot.Mesh->UpdateInstanceTransform(Slot.Instance,SiteLogistics::Hidden(SiteLogistics::YardTransform(Slot.Position)),false,true,true); }
     for (int32 I=0;I<8;++I) { Jobs[I]=FSiteTransfer(); Vehicles[I]->ResetVehicle(QuayPark(I)); }
@@ -219,6 +229,7 @@ bool APortSiteLogistics::Validate(FString& Error) const
     for (const auto& Cargo:Manifest)
     {
         if (IDs.Contains(Cargo.ID)) { Error=TEXT("Duplicate manifest cargo ID"); return false; }
+        if (Cargo.State==2 && Cargo.HandoverMask!=7) { Error=TEXT("Delivered cargo bypassed STS/AGV/RMG handover" ); return false; }
         IDs.Add(Cargo.ID); Ship+=Cargo.State==0; Active+=Cargo.State==1; Placed+=Cargo.State==2;
     }
     for (const auto& Slot:Yard) { Reserved+=Slot.Reserved; OccupiedReservations+=Slot.Reserved && Slot.Occupied; }
@@ -243,6 +254,14 @@ bool APortSiteLogistics::Validate(FString& Error) const
         }
         if (Vehicles[Lane]->Speed>0 && CorridorOwner!=Lane) { Error=TEXT("AGV moved without road reservation"); return false; }
     }
+    if (PlacedContainers.Num()!=Delivered) { Error=TEXT("Delivered cargo actor count mismatch" ); return false; }
+    TSet<FName> PlacedIDs;
+    for (const auto& Cargo:PlacedContainers)
+    {
+        if (!IsValid(Cargo) || Cargo->GetOwner()!=this || Cargo->LocationOwner!=ECargoOwner::Yard || Cargo->GetAttachParentActor() || PlacedIDs.Contains(Cargo->ContainerID))
+        { Error=TEXT("Lost/duplicate/attached yard cargo actor" ); return false; }
+        PlacedIDs.Add(Cargo->ContainerID);
+    }
     if (Physical!=Active) { Error=TEXT("Physical/manifest cargo mismatch"); return false; }
     for (const auto& Crane:Equipment) if (!Crane->ValidateOperation(Error)) return false;
     return true;
@@ -251,6 +270,7 @@ bool APortSiteLogistics::Validate(FString& Error) const
 void APortSiteLogistics::EndPlay(const EEndPlayReason::Type Reason)
 {
     for (auto& Job:Jobs) if (Job.Actor.IsValid()) Job.Actor->Destroy();
+    for (const auto& Cargo:PlacedContainers) if (IsValid(Cargo)) Cargo->Destroy();
     for (const auto& Vehicle:Vehicles) if (IsValid(Vehicle)) Vehicle->Destroy();
     Super::EndPlay(Reason);
 }

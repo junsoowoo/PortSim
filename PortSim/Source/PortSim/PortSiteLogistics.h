@@ -19,7 +19,8 @@ struct FSiteShipCargo
 {
     FTransform Transform;
     TWeakObjectPtr<UHierarchicalInstancedStaticMeshComponent> Mesh;
-    int32 Instance=INDEX_NONE, STS=0, ID=0, State=0; // 0 ship instance, 1 physical transfer, 2 yard instance
+    int32 Instance=INDEX_NONE, STS=0, ID=0, State=0; // 0 aboard, 1 transfer actor, 2 yard actor
+    uint8 HandoverMask=0; // STS->AGV, AGV->RMG, RMG->yard
 };
 struct FSiteTransfer
 {
@@ -55,6 +56,7 @@ public:
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly) int32 DispatchLimit=MAX_int32;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly) FString Fault;
     UPROPERTY() TArray<TObjectPtr<APortAGVActor>> Vehicles;
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly) TArray<TObjectPtr<APortContainerActor>> PlacedContainers;
     UPROPERTY() TArray<TObjectPtr<APortWorkingCrane>> Equipment;
 private:
     TArray<FSiteShipCargo> Manifest;

@@ -12,10 +12,12 @@ APortWorkingCrane::APortWorkingCrane()
     for (int32 I=0;I<4;++I)
     {
         Legs.Add(Box(*FString::Printf(TEXT("Leg_%d"),I),RootComponent,FVector::ZeroVector,FVector(100),true));
+        Bogies.Add(Box(*FString::Printf(TEXT("Bogie_%d"),I),RootComponent,FVector::ZeroVector,FVector(100),true));
         Ropes.Add(Box(*FString::Printf(TEXT("Rope_%d"),I),RootComponent,FVector::ZeroVector,FVector(6)));
     }
     for (int32 I=0;I<2;++I)
     {
+        CrossBeams.Add(Box(*FString::Printf(TEXT("CrossBeam_%d"),I),RootComponent,FVector::ZeroVector,FVector(100)));
         Beams.Add(Box(*FString::Printf(TEXT("Beam_%d"),I),RootComponent,FVector::ZeroVector,FVector(100)));
         auto* Pad=Box(*FString::Printf(TEXT("Slot_%d"),I),RootComponent,FVector::ZeroVector,FVector(100),true);
         Pad->SetAbsolute(true,true,true); // Fixed supports do not follow gantry travel.
@@ -33,36 +35,43 @@ void APortWorkingCrane::Configure(int32 Number,bool bQuayside,FVector Source,FVe
     check(!bConfigured);
     bExternalJobs=!bCreateCargo; CraneID=Number; bSTS=bQuayside; Home=GetActorLocation(); Orientation=GetActorQuat();
     Slots[0]=Source; Slots[1]=Destination;
-    BeamZ=bSTS?5700.f:2300.f; SafeZ=bSTS?5000.f:1900.f;
-    const float HalfGauge=bSTS?1500.f:1600.f;
-    const float HalfBase=bSTS?1200.f:600.f;
-    const float Height=bSTS?5600.f:2200.f;
+    BeamZ=bSTS?3000.f:2600.f; SafeZ=1900.f;
+    const float HalfGauge=bSTS?850.f:1600.f;
+    const float HalfBase=bSTS?1000.f:820.f;
+    const float Height=bSTS?2900.f:2560.f;
     for (int32 I=0;I<4;++I)
     {
-        Legs[I]->SetRelativeLocation(FVector((I<2?-1:1)*HalfGauge,(I%2?-1:1)*HalfBase,20+Height*.5f));
-        Legs[I]->SetRelativeScale3D(FVector(bSTS?2.f:1.f,bSTS?2.f:1.f,Height/100.f));
+        Legs[I]->SetRelativeLocation(FVector((I<2?-1:1)*HalfGauge,(I%2?-1:1)*HalfBase,bSTS?1450.f:1330.f));
+        Legs[I]->SetRelativeScale3D(FVector(1,1,Height/100.f));
+        Bogies[I]->SetRelativeLocation(FVector((I<2?-1:1)*HalfGauge,(I%2?-1:1)*HalfBase,100));
+        Bogies[I]->SetRelativeScale3D(bSTS?FVector(1.8,4.2,1.8):FVector(1.6,3.2,1.6));
     }
     for (int32 I=0;I<2;++I)
     {
-        Beams[I]->SetRelativeLocation(FVector(bSTS?-1500.f:0.f,(I?-1:1)*HalfBase,BeamZ));
-        Beams[I]->SetRelativeScale3D(FVector(bSTS?110.f:34.f,1.5f,1.8f));
+        Beams[I]->SetRelativeLocation(FVector(bSTS?-1500.f:0.f,(I?-1:1)*(bSTS?730.f:650.f),bSTS?3100.f:2600.f));
+        CrossBeams[I]->SetRelativeLocation(FVector((I?-1:1)*HalfGauge,0,bSTS?2900.f:2580.f));
+        CrossBeams[I]->SetRelativeScale3D(bSTS?FVector(1.4,22,1.4):FVector(1.6,18,1.6));
+        Beams[I]->SetRelativeScale3D(FVector(bSTS?125.f:34.f,bSTS?1.f:1.2f,1.8f));
         Pads[I]->SetWorldLocationAndRotation(Slots[I]-FVector(0,0,139.5f),Orientation);
         Pads[I]->SetWorldScale3D(FVector(3.1f,13.f,.2f));
     }
     Mast->SetRelativeLocation(FVector(0,0,BeamZ+1200));
     Mast->SetRelativeScale3D(FVector(3,3,24));
-    Mast->SetVisibility(bSTS);
+    Mast->SetVisibility(false); // Use the central STS twin-boom silhouette, without a dummy mast.
+    Trolley->SetRelativeScale3D(bSTS?FVector(3.6,14.5,1):FVector(4.2,14.5,1.2));
     NameLabel->SetRelativeLocation(FVector(0,0,BeamZ+150));
     NameLabel->SetWorldSize(170);
     NameLabel->SetText(FText::FromString(FString::Printf(TEXT("%s %02d"),bSTS?TEXT("STS"):TEXT("RMG"),CraneID)));
     auto Material=[](const TCHAR* Name) { return LoadObject<UMaterialInterface>(nullptr,*FString::Printf(TEXT("/Game/PortSim/Assets/Materials/M_%s.M_%s"),Name,Name)); };
-    for (const auto& Part:Legs) Part->SetMaterial(0,Material(bSTS?TEXT("SiteBlue"):TEXT("SiteOrange")));
-    for (const auto& Part:Beams) Part->SetMaterial(0,Material(bSTS?TEXT("SiteBlue"):TEXT("SiteOrange")));
+    for (const auto& Part:Legs) Part->SetMaterial(0,Material(bSTS?TEXT("CraneYellow"):TEXT("Target")));
+    for (const auto& Part:Beams) Part->SetMaterial(0,Material(bSTS?TEXT("CraneYellow"):TEXT("Target")));
     for (const auto& Part:Ropes) Part->SetMaterial(0,Material(TEXT("SiteRoad")));
     for (const auto& Part:Pads) Part->SetMaterial(0,Material(TEXT("SiteWhite")));
-    Mast->SetMaterial(0,Material(TEXT("SiteBlue")));
-    Trolley->SetMaterial(0,Material(TEXT("SiteBlue")));
-    Spreader->SetMaterial(0,Material(TEXT("SiteOrange")));
+    for (const auto& Part:Bogies) Part->SetMaterial(0,Material(TEXT("Steel")));
+    for (const auto& Part:CrossBeams) Part->SetMaterial(0,Material(bSTS?TEXT("CraneYellow"):TEXT("Target")));
+    Mast->SetMaterial(0,Material(TEXT("CraneYellow")));
+    Trolley->SetMaterial(0,Material(bSTS?TEXT("CraneYellow"):TEXT("Target")));
+    Spreader->SetMaterial(0,Material(bSTS?TEXT("CraneYellow"):TEXT("Target")));
     if (bCreateCargo)
     {
     FActorSpawnParameters Params;

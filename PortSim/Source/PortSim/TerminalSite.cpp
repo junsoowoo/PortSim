@@ -94,7 +94,8 @@ void AQuayCrane::BuildTerminalSite()
                     FSiteYardSlot Slot;
                     Slot.Position=FVector((205+Bay*13)*100,(Y+(Row-3)*3)*100,149.5f+Tier*259);
                     Slot.Block=Block; Slot.Half=Bay>=15?1:0; Slot.Color=(Bay+Row+Block)%4;
-                    YardSlots.Add(Slot);                }
+                    YardSlots.Add(Slot);
+                }
         // Two disjoint work reservations per block: no shared gantry travel zone.
         for (int32 Half=0;Half<2;++Half)
         {
