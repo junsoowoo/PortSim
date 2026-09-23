@@ -208,6 +208,7 @@ void AQuayCrane::BeginPlay()
     bSmokeTest = FParse::Param(FCommandLine::Get(), TEXT("PortSimSmokeTest"));
     bTerminalTest = FParse::Param(FCommandLine::Get(), TEXT("PortSimTerminalTest")) || FParse::Param(FCommandLine::Get(),TEXT("PortSimFleetResetTest"));
     bTerminalMode = !bSmokeTest;
+    InitializeSTSProfile();
     if (FParse::Param(FCommandLine::Get(),TEXT("PortSimSpeedTest")))
     {
         bool Pass=true;
@@ -303,10 +304,22 @@ void AQuayCrane::SetDriveInput(float Trolley, float Gantry, float Hoist)
 
 void AQuayCrane::ToggleLock()
 {
+    if(STSProfile.bReady)
+    {
+        SampleSTSSensors(true);
+        if(!STSObservation.IsFresh(STSSimulationTime,STSProfile.SensorMaxAge))
+        { Status=TEXT("Lock command denied: sensor data invalid."); return; }
+        if(bLocked && (!STSObservation.bCargoSupported || STSObservation.CargoVelocity.Size()>STSProfile.SettleSpeed))
+        { Status=TEXT("Unlock denied: cargo must be supported and settled."); return; }
+        if(!bLocked && (!STSObservation.bLanded || STSLockFault>=0 || GetCargoMassKg()>STSProfile.RatedPayloadKg))
+        { Status=TEXT("Lock denied: seating / corner lock fault / payload limit."); return; }
+    }
     if (bLocked)
     {
         TwistLock->BreakConstraint();
         bLocked = false;
+        for(bool& Locked:STSCornerLocked) Locked=false;
+        SampleSTSSensors(true);
         Cargo->WakeAllRigidBodies();
         Status = bTerminalMode ? TEXT("Twist lock released. Verifying the destination slot.") : TEXT("Unlocked. Place cargo on the right pad and let it settle.");
         return;
@@ -333,6 +346,8 @@ void AQuayCrane::ToggleLock()
     TwistLock->SetWorldLocation(Spreader->GetComponentLocation() - FVector(0.f, 0.f, Crane::SpreaderHalfHeight));
     TwistLock->SetConstrainedComponents(Spreader, NAME_None, Cargo, NAME_None);
     bLocked = true;
+    for(bool& Locked:STSCornerLocked) Locked=true;
+    SampleSTSSensors(true);
     bDelivered = false;
     DeliverySettleTime = 0.f;
     Spreader->WakeAllRigidBodies();
@@ -371,6 +386,10 @@ void AQuayCrane::Tick(float DeltaSeconds)
     // World timers, control and Chaos consume the same accelerated delta.
     // Chaos subdivides the frame into small physics steps.
     const float Dt=DeltaSeconds;
+    STSSimulationTime+=Dt;
+    SampleSTSSensors();
+    if(bSTSStartPending && STSSimulationTime>1.f)
+    { bSTSStartPending=false; StartAutomatic(false); }
     const double WallNow=FPlatformTime::Seconds();
     const float WallDt=static_cast<float>(FMath::Clamp(WallNow-PreviousWallTick,0.0,0.1));
     PreviousWallTick=WallNow;
@@ -459,14 +478,19 @@ void AQuayCrane::Tick(float DeltaSeconds)
     // Prevent sleeping at a residual pendulum angle while suspended.
     Spreader->WakeAllRigidBodies();
     if (bLocked) Cargo->WakeAllRigidBodies();
-    const bool bDriveStopped=bEmergencyStop || (bTerminalMode && bAutoPaused);
-    const FVector TargetVelocity = bDriveStopped ? FVector::ZeroVector : FVector(DriveInput.X * TravelSpeed, DriveInput.Y * TravelSpeed * 0.6f, DriveInput.Z * HoistSpeed);
-    DriveVelocity = bDriveStopped ? FVector::ZeroVector : FMath::VInterpConstantTo(DriveVelocity, TargetVelocity, Dt, Acceleration);
-    TrolleyPosition = FMath::Clamp(TrolleyPosition + DriveVelocity.X * Dt, bTerminalMode ? -3500.f : -2200.f, bTerminalMode ? 3500.f : 2200.f);
+    const bool bDriveStopped=bEmergencyStop || (bTerminalMode && bAutoPaused) || (bTerminalMode && AutoStage==ETerminalStage::Fault);
+    const float HoistLimit=AutomaticHoistLimit();
+    const FVector TargetVelocity = bDriveStopped ? FVector::ZeroVector : FVector(DriveInput.X * TravelSpeed, DriveInput.Y * STSGantrySpeed(), DriveInput.Z * HoistLimit);
+    if(STSProfile.bReady && !bDriveStopped)
+        DriveVelocity=FVector(FMath::FInterpConstantTo(DriveVelocity.X,TargetVelocity.X,Dt,STSProfile.TrolleyAcceleration),
+            FMath::FInterpConstantTo(DriveVelocity.Y,TargetVelocity.Y,Dt,STSProfile.GantryAcceleration),
+            FMath::FInterpConstantTo(DriveVelocity.Z,TargetVelocity.Z,Dt,STSProfile.HoistAcceleration));
+    else DriveVelocity = bDriveStopped ? FVector::ZeroVector : FMath::VInterpConstantTo(DriveVelocity, TargetVelocity, Dt, Acceleration);
+    TrolleyPosition = FMath::Clamp(TrolleyPosition + DriveVelocity.X * Dt, STSProfile.bReady?STSProfile.MinTrolley():(bTerminalMode ? -3500.f : -2200.f), STSProfile.bReady?STSProfile.MaxTrolley():(bTerminalMode ? 3500.f : 2200.f));
     GantryPosition = FMath::Clamp(GantryPosition + DriveVelocity.Y * Dt, bTerminalMode ? -3200.f : -1800.f, bTerminalMode ? 3200.f : 1800.f);
-    const float NewLength = FMath::Clamp(RopeLength - DriveVelocity.Z * Dt, Crane::MinRope, Crane::MaxRope);
+    const float NewLength = FMath::Clamp(RopeLength - DriveVelocity.Z * Dt, STSProfile.bReady?STSProfile.MinRope:Crane::MinRope, STSProfile.bReady?STSProfile.MaxRope:Crane::MaxRope);
     GantryRoot->SetRelativeLocation(FVector(0.f, GantryPosition, 0.f));
-    TrolleyMesh->SetRelativeLocation(FVector(TrolleyPosition, 0.f, Crane::BeamHeight));
+    TrolleyMesh->SetRelativeLocation(FVector(TrolleyPosition, 0.f, STSBeamHeight()));
     if (!FMath::IsNearlyEqual(NewLength, RopeLength))
     {
         RopeLength = NewLength;
@@ -647,7 +671,7 @@ void APortSimHUD::DrawHUD()
         TogglePosition.X+10.f*Scale,TogglePosition.Y+7.f*Scale,GEngine->GetSmallFont(),Scale);
     AddHitBox(TogglePosition,ToggleSize,TEXT("TogglePortHUD"),true,100);
     if (!CranePawn->bHUDVisible) return;
-    DrawRect(FLinearColor(0.015f, 0.03f, 0.05f, 0.88f), 16.f, 16.f, 650.f * Scale, (CranePawn->bTerminalMode ? 280.f : 208.f) * Scale);
+    DrawRect(FLinearColor(0.015f, 0.03f, 0.05f, 0.88f), 16.f, 16.f, 850.f * Scale, (CranePawn->bTerminalMode ? 310.f : 208.f) * Scale);
     float Y = 28.f;
     auto Line = [this, Scale, &Y](const FString& Text, FLinearColor Color, float FontScale = 1.f)
     {
@@ -668,10 +692,11 @@ void APortSimHUD::DrawHUD()
     Line(TEXT("Space 비상 정지   화살표 회전   PgUp/PgDn 줌"), FLinearColor::White);
     Line(FString::Printf(TEXT("로프 %.1f m   화물 높이 %.1f m   흔들림 %.1f deg   적재 완료 %d"),
         CranePawn->RopeLength / 100.f, CranePawn->GetLoadHeight(), CranePawn->GetSwayDegrees(), CranePawn->Deliveries), FLinearColor::White);
-    Line(FString::Printf(TEXT("트위스트 락: %s   구동: %s   화물: 12 t"),
-        CranePawn->bLocked ? TEXT("작동") : TEXT("개방"), CranePawn->bEmergencyStop ? TEXT("정지") : TEXT("준비")), FLinearColor(1.f, 0.75f, 0.25f));
+    Line(FString::Printf(TEXT("트위스트 락: %s   구동: %s   화물: %.1f t"),
+        CranePawn->bLocked ? TEXT("작동") : TEXT("개방"), CranePawn->bEmergencyStop ? TEXT("정지") : TEXT("준비"),CranePawn->GetCargoMassKg()/1000), FLinearColor(1.f, 0.75f, 0.25f));
+    if(CranePawn->bTerminalMode) Line(CranePawn->GetSTSStatus(),FLinearColor(0.5f,0.85f,1.f),0.85f);
     Line(CranePawn->Status, FLinearColor(0.4f, 1.f, 0.65f));
-    Line(TEXT("프로토타입: 등가 로프 제약, 수평 스프레더, 모터 토크 제한 없음."), FLinearColor(0.6f, 0.7f, 0.8f), 0.85f);
+    Line(TEXT("등가 현수·수평 스프레더 | LT 환산·센서 모델은 가정 설정 적용"), FLinearColor(0.6f, 0.7f, 0.8f), 0.85f);
 }
 
 int32 AQuayCrane::GetSimulationSpeedStep() const

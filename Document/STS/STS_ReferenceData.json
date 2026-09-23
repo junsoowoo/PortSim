@@ -2,6 +2,16 @@
   "schema_version": "1.0",
   "document_kind": "engineering_reference_not_runtime_config",
   "analysis_date": "2026-09-23",
+  "project_objective": {
+    "basis": "user_clarification",
+    "portsim_goal": "Automate container transfer from ship through STS, AGV and yard crane to yard stacking, then quantify end-to-end time savings.",
+    "sts_goal": "Apply equipment parameters, physical conditions and sensor observations to automatically pick containers from the ship, transfer them to AGVs and continue with subsequent jobs.",
+    "parameter_role": "Inputs and constraints that determine automatic movement and control decisions.",
+    "primary_outputs": ["completed_automatic_transfers", "operation_times", "waiting_times", "end_to_end_completion_time", "time_savings_against_defined_baseline"],
+    "comparison_role": "Parameter sweeps and controller ON/OFF comparisons are secondary validation tools.",
+    "time_measurement": "Use simulation event time; account for equipment concurrency rather than summing equipment durations.",
+    "baseline_operation_definition": null
+  },
   "repository_baseline": {
     "branch": "junsoo",
     "commit": "13e007e",
@@ -1206,12 +1216,12 @@
     {
       "phase": 2,
       "status": "proposed",
-      "scope": "wind/collision/profile/camera, valid pose observations, anti-sway/skew comparison with functioning actuators"
+      "scope": "Apply wind/collision/profile/pose observations and sway/skew control to stable automatic movement and landing; comparisons are secondary validation."
     },
     {
       "phase": 3,
       "status": "proposed",
-      "scope": "telescope/twin-lift after spreader details; separate AGV/RMG physical profiles"
+      "scope": "Integrate ship-to-yard automation with AGV/RMG and event-based total-time savings; telescope/twin-lift only when required by handling scope."
     }
   ],
   "validation_plan": {
