@@ -119,6 +119,8 @@ AQuayCrane::AQuayCrane()
     Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
     Camera->SetupAttachment(CameraArm);
     Camera->SetFieldOfView(65.f);
+    Camera->PostProcessSettings.bOverride_AutoExposureBias=true;
+    Camera->PostProcessSettings.AutoExposureBias=-1.5f;
 }
 
 void AQuayCrane::BuildYard()
@@ -165,7 +167,7 @@ void AQuayCrane::ApplyAppearance()
     };
     UMaterialInterface* Yellow = Material(TEXT("CraneYellow"));
     UMaterialInterface* Steel = Material(TEXT("Steel"));
-    UMaterialInterface* QuayMaterial = Material(TEXT("Quay"));
+    UMaterialInterface* QuayMaterial = Material(bTerminalMode ? TEXT("SiteAsphalt") : TEXT("Quay"));
     UMaterialInterface* PickupMaterial = Material(TEXT("Pickup"));
     UMaterialInterface* TargetMaterial = Material(TEXT("Target"));
     TArray<UStaticMeshComponent*> Meshes;
@@ -190,7 +192,7 @@ void AQuayCrane::ApplyAppearance()
         if (Name.StartsWith(TEXT("DeliveryPad"))) Mat = TargetMaterial;
         if (Name.StartsWith(TEXT("Ship"))) Mat = Steel;
         if (Name == TEXT("ShipDeck") || Name == TEXT("ShipBridge")) Mat = QuayMaterial;
-        if (Name == TEXT("Water")) Mat = PickupMaterial;
+        if (Name == TEXT("Water")) Mat = Material(TEXT("SiteWater"));
         if (Name.StartsWith(TEXT("Road_AGV"))) Mat = Steel;
         if (Name.StartsWith(TEXT("AGV_"))) Mat = PickupMaterial;
         if (Name.StartsWith(TEXT("RMG_"))) Mat = TargetMaterial;
@@ -248,9 +250,12 @@ void AQuayCrane::BeginPlay()
             Pass?TEXT("24 container actors, 3 AGV actors, 1 RMG, 1 ship, STS; independent roots/components/IDs; reset preserves actors"):*Error);
         FPlatformMisc::RequestExitWithStatus(false,Pass?0:1);
     }
+    int32 FocusIndex=-1;
+    if (bTerminalMode && FParse::Value(FCommandLine::Get(),TEXT("PortSimSiteFocus="),FocusIndex) && FocusIndex>=0 && FocusIndex<WorkingCranes.Num())
+    { SiteCameraIndex=FocusIndex-1; FocusNextSiteCrane(); }
     float RequestedPlayback=1.f;
     const bool ExplicitPlayback=FParse::Value(FCommandLine::Get(),TEXT("PortSimPlayback="),RequestedPlayback);
-    if ((!bSmokeTest && !bTerminalTest) || ExplicitPlayback)
+    if ((!bSmokeTest && !bTerminalTest && !FParse::Param(FCommandLine::Get(),TEXT("PortSimSiteTest"))) || ExplicitPlayback)
     {
         InstallPlaybackClock();
         while (SimulationSpeed<RequestedPlayback && GetSimulationSpeedStep()<Crane::SpeedLevelCount-1) IncreaseSimulationSpeed();
@@ -459,22 +464,27 @@ void AQuayCrane::Tick(float DeltaSeconds)
         if (PC->WasInputKeyJustPressed(EKeys::Zero) || PC->WasInputKeyJustPressed(EKeys::NumPadZero)) ResetSimulationSpeed();
         if (PC->WasInputKeyJustPressed(EKeys::U)) StartAutomatic(false);
         if (PC->WasInputKeyJustPressed(EKeys::L)) StartAutomatic(true);
-        if (PC->WasInputKeyJustPressed(EKeys::P) && bAutoRunning) bAutoPaused=!bAutoPaused;
+        if (PC->WasInputKeyJustPressed(EKeys::P)) bAutoPaused=!bAutoPaused;
         if (PC->WasInputKeyJustPressed(EKeys::R)) ResetSimulation();
         if (PC->WasInputKeyJustPressed(EKeys::SpaceBar))
         {
             bEmergencyStop = !bEmergencyStop;
             Status = bEmergencyStop ? TEXT("E-STOP: drives stopped; load physics remain active. Space to resume.") : TEXT("Drives enabled.");
         }
+        if (bTerminalMode && PC->WasInputKeyJustPressed(EKeys::Home))
+        { CameraArm->SetRelativeLocation(FVector(35000,0,0)); CameraArm->TargetArmLength=185000.f; CameraArm->SetRelativeRotation(FRotator(-52,38,0)); }
+        if (bTerminalMode && PC->WasInputKeyJustPressed(EKeys::End))
+        { CameraArm->SetRelativeLocation(FVector(5500,0,500)); CameraArm->TargetArmLength=22000.f; }
+        if (bTerminalMode && PC->WasInputKeyJustPressed(EKeys::Tab)) FocusNextSiteCrane();
         const float Orbit = Axis(EKeys::Right, EKeys::Left);
         const float Pitch = Axis(EKeys::Up, EKeys::Down);
         FRotator Rotation = CameraArm->GetRelativeRotation();
         Rotation.Yaw += Orbit * 40.f * WallDt;
         Rotation.Pitch = FMath::Clamp(Rotation.Pitch + Pitch * 25.f * WallDt, -80.f, -8.f);
         CameraArm->SetRelativeRotation(Rotation);
-        CameraArm->TargetArmLength = FMath::Clamp(CameraArm->TargetArmLength + Axis(EKeys::PageDown, EKeys::PageUp) * 2500.f * WallDt, 2500.f, 42000.f);
+        CameraArm->TargetArmLength = FMath::Clamp(CameraArm->TargetArmLength + Axis(EKeys::PageDown, EKeys::PageUp) * FMath::Max(2500.f, CameraArm->TargetArmLength * .65f) * WallDt, 2500.f, bTerminalMode ? 220000.f : 42000.f);
     }
-    if (bTerminalMode) TickAutomatic(Dt);
+    if (bTerminalMode) { TickAutomatic(Dt); TickSiteOperations(Dt); }
     // Prevent sleeping at a residual pendulum angle while suspended.
     Spreader->WakeAllRigidBodies();
     if (bLocked) Cargo->WakeAllRigidBodies();

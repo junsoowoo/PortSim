@@ -1,4 +1,6 @@
 #include "QuayCrane.h"
+#include "PortWorkingCrane.h"
+#include "PortSiteLogistics.h"
 #include "Components/StaticMeshComponent.h"
 #include "TerminalLayout.h"
 #include "Engine/World.h"
@@ -52,9 +54,9 @@ void AQuayCrane::BuildFleet()
     RMGActor->SetActorLabel(TEXT("RMG_01"));
     RMGActor->SetFolderPath(TEXT("PortSim/Equipment"));
 #endif
-    CameraArm->TargetArmLength=30000.f;
-    CameraArm->SetRelativeLocation(FVector(5500,0,500));
-    CameraArm->SetRelativeRotation(FRotator(-52,-38,0));
+    CameraArm->TargetArmLength=185000.f;
+    CameraArm->SetRelativeLocation(FVector(35000,0,0));
+    CameraArm->SetRelativeRotation(FRotator(-52,38,0));
     ResetFleet();
 }
 
@@ -191,6 +193,17 @@ void AQuayCrane::TickFleet(float Dt)
 FString AQuayCrane::GetFleetStatus() const
 {
     if (AGVActors.IsEmpty()) return TEXT("");
-    return FString::Printf(TEXT("AGV 1/2/3 jobs %d / %d / %d | Active AGV %d | RMG %s | step %d"),
-        AGVActors[0]->CompletedJobs,AGVActors[1]->CompletedJobs,AGVActors[2]->CompletedJobs,ActiveAGV+1,bRMGHasCargo?TEXT("CARRY"):TEXT("READY"),RMGStep);
+    if (SiteLogistics)
+    {
+        int32 CentralShip=0,CentralYard=0;
+        for (const auto& C:ContainerActors) { CentralShip+=C->LocationOwner==ECargoOwner::Ship; CentralYard+=C->LocationOwner==ECargoOwner::Yard; }
+        return FString::Printf(TEXT("Ship %d | AGV / crane transit %d | Yard %d (initial %d) | Delivered %d | %s"),
+            SiteLogistics->ShipRemaining()+CentralShip,SiteLogistics->InTransit()+24-CentralShip-CentralYard,
+            SiteLogistics->InitialYard+SiteLogistics->Delivered+CentralYard,SiteLogistics->InitialYard,SiteLogistics->Delivered+CentralYard,
+            SiteLogistics->Fault.IsEmpty()?TEXT("STS > AGV > RMG") : *SiteLogistics->Fault);
+    }
+    int32 Jobs=0, Faults=0;
+    for (const auto& Crane:WorkingCranes) { Jobs+=Crane->CompletedJobs; Faults+=!Crane->Fault.IsEmpty(); }
+    return FString::Printf(TEXT("Site: %d cranes / %d moves / %d faults | AGV 1/2/3 jobs %d / %d / %d | Active AGV %d | RMG %s | step %d"),
+        WorkingCranes.Num(),Jobs,Faults,AGVActors[0]->CompletedJobs,AGVActors[1]->CompletedJobs,AGVActors[2]->CompletedJobs,ActiveAGV+1,bRMGHasCargo?TEXT("CARRY"):TEXT("READY"),RMGStep);
 }

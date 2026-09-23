@@ -1,4 +1,6 @@
 #include "QuayCrane.h"
+#include "PortWorkingCrane.h"
+#include "PortSiteLogistics.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -72,7 +74,10 @@ void AQuayCrane::DestroyTerminalActors()
     auto Destroy=[](AActor* Actor) { if (IsValid(Actor) && !Actor->IsActorBeingDestroyed()) Actor->Destroy(); };
     for (const auto& Container:ContainerActors) Destroy(Container);
     for (const auto& Vehicle:AGVActors) Destroy(Vehicle);
-    Destroy(RMGActor); Destroy(ShipActor);
+    Destroy(SiteLogistics); SiteLogistics=nullptr;
+    for (const auto& Crane:WorkingCranes) Destroy(Crane);
+    WorkingCranes.Reset();
+    Destroy(RMGActor); Destroy(ShipActor); Destroy(SiteActor); SiteActor=nullptr;
     ContainerActors.Reset(); CargoBodies.Reset(); AGVActors.Reset();
     RMGActor=nullptr; RMGSpreader=nullptr; ShipActor=nullptr; Cargo=nullptr;
 }

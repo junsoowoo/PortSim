@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Pawn.h"
@@ -8,6 +8,8 @@
 #include "STSOperatingProfile.h"
 #include "QuayCrane.generated.h"
 
+class APortWorkingCrane;
+class APortSiteLogistics;
 class UStaticMeshComponent;
 class UPhysicsConstraintComponent;
 class USpringArmComponent;
@@ -182,6 +184,19 @@ private:
 
     void BuildYard();
     void BuildTerminal();
+    void BuildTerminalSite();
+    void TickSiteOperations(float Dt);
+    void ResetSiteOperations();
+    UPROPERTY() TObjectPtr<APortSiteLogistics> SiteLogistics;
+    void FocusNextSiteCrane();
+    int32 SiteCameraIndex=-1;
+    void TickSiteTest(float Dt);
+    UPROPERTY() TArray<TObjectPtr<APortWorkingCrane>> WorkingCranes;
+    float SiteTestTime=0.f;
+    float SiteTestHold=0.f;
+    int32 SiteTestStage=0;
+    TArray<FVector> SiteTestPositions;
+    UPROPERTY() TObjectPtr<AActor> SiteActor;
     void ResetTerminal();
     void ApplyAppearance();
     void UpdateRopes();

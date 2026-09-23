@@ -7,14 +7,14 @@
 
 APortShipActor::APortShipActor()
 {
-    Box(TEXT("ShipHull"),RootComponent,FVector(0,0,-95),FVector(1700,8200,550),true);
-    Box(TEXT("ShipDeck"),RootComponent,FVector(0,0,190),FVector(1600,8000,20),true);
-    Box(TEXT("ShipBow1"),RootComponent,FVector(0,4350,-95),FVector(1300,500,550),true);
-    Box(TEXT("ShipBow2"),RootComponent,FVector(0,4730,-95),FVector(750,260,550),true);
-    Box(TEXT("ShipBow3"),RootComponent,FVector(0,4930,-95),FVector(250,180,550),true);
-    Box(TEXT("ShipStern"),RootComponent,FVector(0,-4390,-95),FVector(1400,580,550),true);
-    Box(TEXT("ShipBridge"),RootComponent,FVector(0,-4250,530),FVector(1050,600,700),true);
-    Box(TEXT("ShipBridgeWindows"),RootComponent,FVector(0,-4250,800),FVector(1150,650,110),true);
-    Box(TEXT("ShipFunnel"),RootComponent,FVector(-250,-4420,1080),FVector(200,220,400),true);
+    Box(TEXT("ShipHull"),RootComponent,FVector(-1400,0,-95),FVector(4500,28200,550),true);
+    Box(TEXT("ShipDeck"),RootComponent,FVector(-1400,0,190),FVector(4400,28000,20),true);
+    Box(TEXT("ShipBow1"),RootComponent,FVector(-1400,14350,-95),FVector(3400,500,550),true);
+    Box(TEXT("ShipBow2"),RootComponent,FVector(-1400,14730,-95),FVector(2200,260,550),true);
+    Box(TEXT("ShipBow3"),RootComponent,FVector(-1400,14930,-95),FVector(1000,180,550),true);
+    Box(TEXT("ShipStern"),RootComponent,FVector(-1400,-14390,-95),FVector(4000,580,550),true);
+    Box(TEXT("ShipBridge"),RootComponent,FVector(-1400,-13250,1230),FVector(3800,1600,2100),true);
+    Box(TEXT("ShipBridgeWindows"),RootComponent,FVector(-1400,-13250,2200),FVector(3900,1650,110),true);
+    Box(TEXT("ShipFunnel"),RootComponent,FVector(-1650,-13420,2480),FVector(600,620,700),true);
     Tags.Add(TEXT("PortSim.Ship"));
 }
