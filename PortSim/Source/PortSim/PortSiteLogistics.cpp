@@ -5,6 +5,9 @@
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
+#include "Misc/Paths.h"
+#include "Misc/FileHelper.h"
+#include "HAL/FileManager.h"
 
 namespace SiteLogistics
 {
@@ -26,6 +29,7 @@ void APortSiteLogistics::AddShipCargo(FVector Position,int32 STS)
     auto* Cargo=GetWorld()->SpawnActor<APortContainerActor>(Position,FRotator::ZeroRotator,Params);
     check(Cargo);
     Cargo->InitializeContainer(Record.ID);
+    if(STSProfile.bReady) Cargo->SetPhysicalParameters(STSProfile.ContainerMassKg,STSProfile.ContainerCoG);
     // Secured aboard until pickup: real collidable actors, without 1,064 idle rigid bodies.
     Cargo->GetBody()->SetSimulatePhysics(false);
     Cargo->LocationOwner=ECargoOwner::Ship;
@@ -66,6 +70,8 @@ void APortSiteLogistics::Initialize(const TArray<TObjectPtr<APortWorkingCrane>>&
         Vehicle->InitializeVehicle(100+I); Vehicles.Add(Vehicle);
     }
     bReady=true;
+    BeginReport();
+    if(!STSProfile.bReady) Stop(TEXT("Site STS reference unavailable: ")+STSProfile.Error);
 #if WITH_EDITOR
     SetActorLabel(TEXT("DGT_STS_AGV_RMG_Dispatch"));
     SetFolderPath(TEXT("PortSim/Logistics"));
@@ -95,10 +101,10 @@ void APortSiteLogistics::Dispatch(int32 Lane)
     auto* Cargo=Record.Actor.Get();
     if (!IsValid(Cargo)) { Stop(TEXT("Missing persistent ship cargo actor")); return; }
     Record.State=1;
-    Job.Cargo=CargoIndex; Job.Slot=SlotIndex; Job.RMG=CraneIndex; Job.Actor=Cargo; Job.Stage=1; Job.Time=0;
+    Job.Cargo=CargoIndex; Job.Slot=SlotIndex; Job.RMG=CraneIndex; Job.Actor=Cargo; Job.Stage=1; Job.Time=0; Job.StartedAt=SimulationTime;
     SlotAssigned[SlotIndex]=true; BlocksBusy[Yard[SlotIndex].Block]=true; NextRMG=(CraneIndex+1)%36; ++Dispatched;
-    if (!Equipment[36+Lane]->AssignCargo(Cargo,Record.Transform.GetLocation(),Vehicles[Lane]->CargoPosition(),false,false))
-        Stop(TEXT("STS could not accept reserved cargo"));
+    if (!Equipment[36+Lane]->AssignCargo(Cargo,Record.Transform.GetLocation(),Vehicles[Lane]->CargoPosition(),false,false,Vehicles[Lane]))
+    { Stop(TEXT("STS could not accept reserved cargo: ")+Equipment[36+Lane]->Fault); return; }
     UE_LOG(LogTemp,Display,TEXT("SITE_JOB: C%d STS%d -> AGV%d -> RMG%d -> slot%d"),Record.ID,Lane+1,100+Lane,CraneIndex+1,SlotIndex);
 }
 
@@ -143,8 +149,11 @@ void APortSiteLogistics::Stop(const FString& Reason)
 void APortSiteLogistics::Advance(float Dt,bool Paused)
 {
     if (!bReady) return;
+    SimulationTime+=Dt;
+    for(auto& Job:Jobs) if(Job.Stage) { Job.Time+=Dt; if(Paused) Job.PausedSeconds+=Dt; }
     Freeze(Paused || !Fault.IsEmpty());
-    if (Paused || !Fault.IsEmpty()) return;
+    if (Paused || !Fault.IsEmpty())
+    { for(const auto& Crane:Equipment) Crane->Advance(Dt,true); return; }
     for (const auto& Crane:Equipment)
     {
         Crane->Advance(Dt,false);
@@ -153,8 +162,7 @@ void APortSiteLogistics::Advance(float Dt,bool Paused)
     for (int32 Lane=0;Lane<Jobs.Num();++Lane)
     {
         auto& Job=Jobs[Lane]; auto* Vehicle=Vehicles[Lane].Get();
-        if (Job.Stage==0) { Dispatch(Lane); continue; }
-        Job.Time+=Dt;
+        if (Job.Stage==0) { Dispatch(Lane); if(!Fault.IsEmpty()) return; continue; }
         if (Job.Time>12000.f) { Stop(TEXT("Shipment timeout")); return; }
         auto* Cargo=Job.Actor.Get();
         switch(Job.Stage)
@@ -167,6 +175,7 @@ void APortSiteLogistics::Advance(float Dt,bool Paused)
             Cargo->AttachToComponent(Vehicle->GetRootComponent(),FAttachmentTransformRules::KeepWorldTransform);
             Cargo->LocationOwner=ECargoOwner::AGV;
             Manifest[Job.Cargo].HandoverMask|=1;
+            Job.HandoverAt=SimulationTime;
             UE_LOG(LogTemp,Display,TEXT("SITE_HANDOVER: C%d STS -> AGV%d"),Manifest[Job.Cargo].ID,100+Lane);
             PrepareRoute(Lane,false); Job.Stage=2; break;
         case 2:
@@ -191,6 +200,10 @@ void APortSiteLogistics::Advance(float Dt,bool Paused)
             PlacedContainers.Add(Cargo);
             Manifest[Job.Cargo].HandoverMask|=4;
             Manifest[Job.Cargo].State=2; ++Delivered; ++Vehicle->CompletedJobs;
+            ResultsCsv+=FString::Printf(TEXT("C%d,%d,%d,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.1f\n"),
+                Manifest[Job.Cargo].ID,Lane+1,100+Lane,Job.RMG+1,Job.StartedAt,Job.HandoverAt,SimulationTime,
+                Job.Time,Equipment[36+Lane]->LastJobSeconds,Job.PausedSeconds,Cargo->MassKg);
+            if(!SaveReports()) { Stop(TEXT("Could not save site STS shipment report")); return; }
             UE_LOG(LogTemp,Display,TEXT("SITE_DELIVERED: C%d via AGV%d -> RMG%d; total=%d"),Manifest[Job.Cargo].ID,100+Lane,Job.RMG+1,Delivered);
             Job.Actor=nullptr;
             PrepareRoute(Lane,true); Job.Stage=5; break;
@@ -224,6 +237,8 @@ void APortSiteLogistics::ResetLogistics()
     for (int32 I=0;I<8;++I) { Jobs[I]=FSiteTransfer(); Vehicles[I]->ResetVehicle(QuayPark(I)); }
     BlocksBusy.Init(false,18); SlotAssigned.Init(false,Yard.Num());
     CorridorOwner=INDEX_NONE; NextRMG=Dispatched=Delivered=0; Fault.Empty(); bWasPaused=false;
+    BeginReport();
+    if(!STSProfile.bReady) Stop(TEXT("Site STS reference unavailable"));
 }
 
 int32 APortSiteLogistics::ShipRemaining() const
@@ -312,4 +327,22 @@ TArray<FVector> APortSiteLogistics::Snapshot() const
     for (const auto& Cargo:ShipContainers) Positions.Add(Cargo->GetActorLocation());
     for (const auto& Crane:Equipment) { Positions.Add(Crane->GetActorLocation()); Positions.Add(Crane->HeadPosition()); }
     return Positions;
+}
+
+void APortSiteLogistics::BeginReport()
+{
+    SimulationTime=0;
+    ReportBase=FPaths::ProjectSavedDir()/TEXT("Results")/TEXT("Site_")+FGuid::NewGuid().ToString(EGuidFormats::Digits);
+    ResultsCsv=TEXT("ContainerID,STSLane,AGVID,RMGID,StartedAtSeconds,STSHandoverAtSeconds,FinalPlacementAtSeconds,ShipmentSeconds,STSSeconds,PausedSeconds,PayloadKg\n");
+    if(!SaveReports()) Stop(TEXT("Could not initialize site shipment report"));
+}
+
+bool APortSiteLogistics::SaveReports() const
+{
+    if(ReportBase.IsEmpty()) return false;
+    IFileManager::Get().MakeDirectory(*FPaths::GetPath(ReportBase),true);
+    const FString Snapshot=TEXT("{\"site_suspension_model\":\"kinematic level spreader; synthetic sensors; quasi-static corner loads\",\"sts_profile\":")+
+        (STSProfile.SnapshotJson.IsEmpty()?TEXT("{}"):STSProfile.SnapshotJson)+TEXT("}");
+    return FFileHelper::SaveStringToFile(ResultsCsv,*(ReportBase+TEXT(".csv")),FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM) &&
+        FFileHelper::SaveStringToFile(Snapshot,*(ReportBase+TEXT("_profile.json")),FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
 }

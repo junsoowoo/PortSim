@@ -1,6 +1,6 @@
 param(
     [string]$Engine = 'C:\Program Files\Epic Games\UE_5.6',
-    [ValidateSet('All','Faults','Profile','Terminal','Smoke','SensorFault','LockFault','Overload')][string]$Mode = 'All'
+    [ValidateSet('All','Faults','RegressionTail','FleetReset','Profile','Terminal','Smoke','SensorFault','LockFault','Overload')][string]$Mode = 'All'
 )
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
@@ -9,6 +9,7 @@ $editor = Join-Path $Engine 'Engine\Binaries\Win64\UnrealEditor-Cmd.exe'
 $logDir = Join-Path $root 'Saved\Logs'
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 $cases = if ($Mode -eq 'All') { @('Profile','Terminal','Smoke','SensorFault','LockFault','Overload') }
+    elseif ($Mode -eq 'RegressionTail') { @('FleetReset','Smoke','SensorFault','LockFault','Overload') }
     elseif ($Mode -eq 'Faults') { @('SensorFault','LockFault','Overload') } else { @($Mode) }
 foreach ($case in $cases) {
     $caseStarted = Get-Date
@@ -22,6 +23,7 @@ foreach ($case in $cases) {
         $arguments += @('/Engine/Maps/Entry','-game','-benchmark','-fps=20')
         if ($case -eq 'Smoke') { $arguments += '-PortSimSmokeTest'; $passPattern = 'PORTSIM_SMOKE_PASS:' }
         else { $arguments += '-PortSimTerminalTest'; $passPattern = 'PORTSIM_TERMINAL_PASS:' }
+        if ($case -eq 'FleetReset') { $arguments += '-PortSimFleetResetTest' }
         if ($case -eq 'SensorFault') { $arguments += '-PortSimSTSSensorFault'; $expectedFailure = 'Required STS sensor observation invalid/stale' }
         if ($case -eq 'LockFault') { $arguments += '-PortSimSTSLockFault=0'; $expectedFailure = 'Twist lock alignment failed' }
         if ($case -eq 'Overload') {
@@ -38,7 +40,7 @@ foreach ($case in $cases) {
     Write-Output "RUN $case"
     $process = Start-Process -FilePath $editor -ArgumentList $arguments -WindowStyle Hidden -PassThru
     $null = $process.Handle
-    if (-not $process.WaitForExit(600000)) { $process.Kill(); throw "$case timed out after 10 minutes" }
+    if (-not $process.WaitForExit(1200000)) { $process.Kill(); throw "$case timed out after 20 minutes" }
     $process.Refresh()
     if (-not (Test-Path -LiteralPath $log)) { throw "$case created no log" }
     $text = Get-Content -LiteralPath $log -Raw

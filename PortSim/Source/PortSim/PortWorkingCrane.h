@@ -2,10 +2,12 @@
 
 #include "CoreMinimal.h"
 #include "PortEquipmentActor.h"
+#include "STSOperatingProfile.h"
 #include "PortWorkingCrane.generated.h"
 
 class APortContainerActor;
 class UTextRenderComponent;
+class APortAGVActor;
 
 /** Independently reserved two-slot crane job. Gantry/trolley/hoist are driven;
  * cargo is locked to the spreader during transport and physically released. */
@@ -17,7 +19,11 @@ public:
     APortWorkingCrane();
     void Configure(int32 Number, bool bQuayside, FVector Source, FVector Destination, bool bCreateCargo=true);
     void Advance(float Dt, bool bGlobalPaused);
-    bool AssignCargo(APortContainerActor* Cargo, FVector Source, FVector Destination, bool SourceSupport, bool DestinationSupport);
+    bool AssignCargo(APortContainerActor* Cargo, FVector Source, FVector Destination, bool SourceSupport, bool DestinationSupport, APortAGVActor* HandoverVehicle=nullptr);
+    void SetSTSProfile(const FSTSOperatingProfile& Profile) { STSProfile=Profile; }
+    bool HasSTSProfile() const { return STSProfile.bReady; }
+    double LastJobSeconds=0, LastPausedSeconds=0;
+    FSTSObservation Observation;
     bool IsBusy() const { return bJobActive; }
     UFUNCTION(BlueprintCallable, Category="Operation") void ResetOperation();
     UFUNCTION(BlueprintCallable, Category="Operation") void SetOperationPaused(bool Paused);
@@ -34,6 +40,18 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Operation") FString Fault;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Operation") TObjectPtr<APortContainerActor> CargoActor;
 private:
+    FSTSOperatingProfile STSProfile;
+    UPROPERTY() TObjectPtr<APortAGVActor> HandoverAGV;
+    FVector AxisVelocity=FVector::ZeroVector;
+    double SimulationTime=0, NextSample=0, JobSeconds=0, PausedSeconds=0;
+    bool CornerLocked[4]={false,false,false,false};
+    bool bSensorFault=false;
+    int32 LockFault=INDEX_NONE;
+    void SampleSTS(bool Force=false);
+    bool MoveSTS(FVector Target,float Dt);
+    bool CargoSupported() const;
+    bool AGVAligned() const;
+    void ClearSTSState();
     UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> Legs;
     UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> Beams;
     UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> Bogies;

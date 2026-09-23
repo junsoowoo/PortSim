@@ -1,6 +1,7 @@
 #pragma once
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "STSOperatingProfile.h"
 #include "PortSiteLogistics.generated.h"
 
 class APortWorkingCrane;
@@ -25,7 +26,7 @@ struct FSiteShipCargo
 struct FSiteTransfer
 {
     int32 Cargo=INDEX_NONE, Slot=INDEX_NONE, RMG=INDEX_NONE, Stage=0, Waypoint=0;
-    float Time=0;
+    double Time=0, StartedAt=0, PausedSeconds=0, HandoverAt=-1;
     TWeakObjectPtr<APortContainerActor> Actor;
     TArray<FVector> Route;
 };
@@ -37,6 +38,7 @@ class PORTSIM_API APortSiteLogistics : public AActor
     GENERATED_BODY()
 public:
     APortSiteLogistics();
+    void SetSTSProfile(const FSTSOperatingProfile& Profile) { STSProfile=Profile; }
     void AddShipCargo(FVector Position,int32 STS);
     void Initialize(const TArray<TObjectPtr<APortWorkingCrane>>& Cranes,TArray<FSiteYardSlot> Slots,
         const TArray<UHierarchicalInstancedStaticMeshComponent*>& Palette,int32 CentralCargo,int32 FixedYard);
@@ -60,6 +62,11 @@ public:
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly) TArray<TObjectPtr<APortContainerActor>> PlacedContainers;
     UPROPERTY() TArray<TObjectPtr<APortWorkingCrane>> Equipment;
 private:
+    FSTSOperatingProfile STSProfile;
+    double SimulationTime=0;
+    FString ReportBase, ResultsCsv;
+    bool SaveReports() const;
+    void BeginReport();
     TArray<FSiteShipCargo> Manifest;
     TArray<FSiteYardSlot> Yard;
     TArray<FSiteTransfer> Jobs;

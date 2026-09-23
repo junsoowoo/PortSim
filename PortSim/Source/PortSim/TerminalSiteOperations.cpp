@@ -2,6 +2,7 @@
 #include "PortWorkingCrane.h"
 #include "PortSiteLogistics.h"
 #include "PortAGVActor.h"
+#include "PortContainerActor.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "GameFramework/SpringArmComponent.h"
@@ -27,7 +28,21 @@ void AQuayCrane::TickSiteTest(float Dt)
         FPlatformMisc::RequestExitWithStatus(false,Pass?0:1);
     };
     FString Error;
+    for(const auto& Crane:WorkingCranes)
+    {
+        if(Crane->bSTS && !Crane->HasSTSProfile()) { Finish(false,TEXT("Site STS missing reference profile")); return; }
+        if(Crane->bSTS && Crane->bCarrying && !Crane->Observation.AllLocked())
+        { Finish(false,TEXT("Site STS carried cargo without four locks")); return; }
+        if(!Crane->bSTS && Crane->HasSTSProfile()) { Finish(false,TEXT("STS reference incorrectly assigned to RMG")); return; }
+    }
+    for(const auto& Container:SiteLogistics->ShipContainers)
+        if(!FMath::IsNearlyEqual(Container->MassKg,STSProfile.ContainerMassKg,1.f) || !Container->CoGOffsetCm.Equals(STSProfile.ContainerCoG))
+        { Finish(false,TEXT("Site container mass/CoG profile mismatch")); return; }
     if (!SiteLogistics->Validate(Error)) { Finish(false,Error); return; }
+    if(FParse::Param(FCommandLine::Get(),TEXT("PortSimSTSAGVFault")))
+        for(int32 I=36;I<WorkingCranes.Num();++I)
+            if(WorkingCranes[I]->bCarrying && WorkingCranes[I]->Stage==4)
+            { SiteLogistics->Vehicles[I-36]->AddActorWorldOffset(FVector(100,0,0)); break; }
     if (SiteTestTime>14000.f) { Finish(false,TEXT("Integrated logistics timeout")); return; }
     bool Moving=false;
     for (const auto& Vehicle:SiteLogistics->Vehicles) Moving|=Vehicle->Speed>1.f;
