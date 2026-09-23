@@ -18,8 +18,8 @@ struct FSiteYardSlot
 struct FSiteShipCargo
 {
     FTransform Transform;
-    TWeakObjectPtr<UHierarchicalInstancedStaticMeshComponent> Mesh;
-    int32 Instance=INDEX_NONE, STS=0, ID=0, State=0; // 0 aboard, 1 transfer actor, 2 yard actor
+    TWeakObjectPtr<APortContainerActor> Actor;
+    int32 STS=0, ID=0, State=0; // same actor: 0 aboard, 1 transfer, 2 yard
     uint8 HandoverMask=0; // STS->AGV, AGV->RMG, RMG->yard
 };
 struct FSiteTransfer
@@ -37,7 +37,7 @@ class PORTSIM_API APortSiteLogistics : public AActor
     GENERATED_BODY()
 public:
     APortSiteLogistics();
-    void AddShipCargo(UHierarchicalInstancedStaticMeshComponent* Mesh,int32 Instance,const FTransform& Transform,int32 STS);
+    void AddShipCargo(FVector Position,int32 STS);
     void Initialize(const TArray<TObjectPtr<APortWorkingCrane>>& Cranes,TArray<FSiteYardSlot> Slots,
         const TArray<UHierarchicalInstancedStaticMeshComponent*>& Palette,int32 CentralCargo,int32 FixedYard);
     void Advance(float Dt,bool Paused);
@@ -56,6 +56,7 @@ public:
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly) int32 DispatchLimit=MAX_int32;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly) FString Fault;
     UPROPERTY() TArray<TObjectPtr<APortAGVActor>> Vehicles;
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly) TArray<TObjectPtr<APortContainerActor>> ShipContainers;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly) TArray<TObjectPtr<APortContainerActor>> PlacedContainers;
     UPROPERTY() TArray<TObjectPtr<APortWorkingCrane>> Equipment;
 private:

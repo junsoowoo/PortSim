@@ -58,7 +58,7 @@ void AQuayCrane::TickSiteTest(float Dt)
     {
         for (const auto& Vehicle:SiteLogistics->Vehicles)
             if (Vehicle->CompletedJobs!=1) { Finish(false,TEXT("Not all eight AGVs performed a handover")); return; }
-        const FString Summary=FString::Printf(TEXT("yard %d -> %d (removed %d = all vessel cargo); 8 complete STS/AGV/RMG shipments with same retained physical actors and IDs; road/slot reservations, physical placement, return, pause/E-stop and in-transit reset"),
+        const FString Summary=FString::Printf(TEXT("yard %d -> %d (removed %d = all vessel cargo); all 1064 site ship containers exist as actors from startup and survive reset; 8 complete STS/AGV/RMG shipments retain their original actors and IDs; road/slot reservations, physical placement, return, pause/E-stop and in-transit reset"),
             SiteLogistics->BaselineYard,SiteLogistics->InitialYard,SiteLogistics->InitialShipCount());
         SiteLogistics->ResetLogistics();
         if (!SiteLogistics->Validate(Error) || SiteLogistics->Delivered || SiteLogistics->InTransit())

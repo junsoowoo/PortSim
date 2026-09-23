@@ -115,9 +115,7 @@ void AQuayCrane::BuildTerminalSite()
         const float ShipDeck=FMath::Abs(Y)<200.f?200.f:440.f;
         Crane->Configure(WorkingCranes.Num(),true,FVector(-1600,(Y-8)*100,ShipDeck+129.5f),FVector(4500,(Y+8)*100,149.5f),false);
         const FVector Position(-1600,(Y-8)*100,ShipDeck+129.5f);
-        const FVector Size(2.44,12.2,2.59);
-        const int32 Instance=Box(Blue,Position/100.,Size);
-        SiteLogistics->AddShipCargo(Blue,Instance,FTransform(FQuat::Identity,Position,Size),STSIndex++);
+        SiteLogistics->AddShipCargo(Position,STSIndex++);
     }
     // Two 300 x 45 m context vessels; the working ship occupies the middle berth.
     for (float Y:{-350.f,350.f})
@@ -131,11 +129,8 @@ void AQuayCrane::BuildTerminalSite()
                 for (int32 Tier=0;Tier<3;++Tier)
                 {
                     const FVector Position(-49+Row*3,Y-99+Bay*13,5.695+Tier*2.59);
-                    const FVector Size(2.438,12.192,2.59);
-                    auto* Mesh=Containers[(Row+Bay)%4];
-                    const int32 Instance=Box(Mesh,Position,Size);
                     const int32 Nearest=FMath::Clamp(FMath::RoundToInt((Position.Y-(Y-100))/100.f),0,2)+(Y<0?0:5);
-                    SiteLogistics->AddShipCargo(Mesh,Instance,FTransform(FQuat::Identity,Position*100.,Size),Nearest);
+                    SiteLogistics->AddShipCargo(Position*100.,Nearest);
                 }
     }
     auto Building=[&](const TCHAR* Name,float X,float Y,FVector Size)

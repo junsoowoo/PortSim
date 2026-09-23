@@ -15,13 +15,24 @@ namespace SiteLogistics
 
 APortSiteLogistics::APortSiteLogistics() { PrimaryActorTick.bCanEverTick=false; }
 
-void APortSiteLogistics::AddShipCargo(UHierarchicalInstancedStaticMeshComponent* Mesh,int32 Instance,const FTransform& Transform,int32 STS)
+void APortSiteLogistics::AddShipCargo(FVector Position,int32 STS)
 {
-    FSiteShipCargo Cargo;
-    Cargo.Mesh=Mesh; Cargo.Instance=Instance; Cargo.Transform=Transform; Cargo.STS=STS;
-    Cargo.ID=2000+Manifest.Num(); Manifest.Add(Cargo);
+    check(STS>=0 && STS<8);
+    FSiteShipCargo Record;
+    Record.Transform=FTransform(FQuat::Identity,Position);
+    Record.STS=STS; Record.ID=2000+Manifest.Num();
+    FActorSpawnParameters Params; Params.Owner=this;
+    Params.SpawnCollisionHandlingOverride=ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    auto* Cargo=GetWorld()->SpawnActor<APortContainerActor>(Position,FRotator::ZeroRotator,Params);
+    check(Cargo);
+    Cargo->InitializeContainer(Record.ID);
+    // Secured aboard until pickup: real collidable actors, without 1,064 idle rigid bodies.
+    Cargo->GetBody()->SetSimulatePhysics(false);
+    Cargo->LocationOwner=ECargoOwner::Ship;
+    Record.Actor=Cargo;
+    ShipContainers.Add(Cargo);
+    Manifest.Add(Record);
 }
-
 FVector APortSiteLogistics::QuayPark(int32 Lane) const
 { return FVector(4500,(SiteLogistics::CraneY[Lane]+8)*100,0); }
 FVector APortSiteLogistics::YardHandover(const FSiteYardSlot& Slot) const
@@ -81,15 +92,12 @@ void APortSiteLogistics::Dispatch(int32 Lane)
     }
     if (SlotIndex==INDEX_NONE) return;
     auto& Record=Manifest[CargoIndex]; auto& Job=Jobs[Lane];
-    FActorSpawnParameters Params; Params.Owner=this;
-    Params.SpawnCollisionHandlingOverride=ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-    auto* Cargo=GetWorld()->SpawnActor<APortContainerActor>(Record.Transform.GetLocation(),FRotator::ZeroRotator,Params);
-    Cargo->InitializeContainer(Record.ID); Cargo->LocationOwner=ECargoOwner::Ship;
-    Record.Mesh->UpdateInstanceTransform(Record.Instance,SiteLogistics::Hidden(Record.Transform),false,true,true);
+    auto* Cargo=Record.Actor.Get();
+    if (!IsValid(Cargo)) { Stop(TEXT("Missing persistent ship cargo actor")); return; }
     Record.State=1;
     Job.Cargo=CargoIndex; Job.Slot=SlotIndex; Job.RMG=CraneIndex; Job.Actor=Cargo; Job.Stage=1; Job.Time=0;
     SlotAssigned[SlotIndex]=true; BlocksBusy[Yard[SlotIndex].Block]=true; NextRMG=(CraneIndex+1)%36; ++Dispatched;
-    if (!Equipment[36+Lane]->AssignCargo(Cargo,Record.Transform.GetLocation(),Vehicles[Lane]->CargoPosition(),true,false))
+    if (!Equipment[36+Lane]->AssignCargo(Cargo,Record.Transform.GetLocation(),Vehicles[Lane]->CargoPosition(),false,false))
         Stop(TEXT("STS could not accept reserved cargo"));
     UE_LOG(LogTemp,Display,TEXT("SITE_JOB: C%d STS%d -> AGV%d -> RMG%d -> slot%d"),Record.ID,Lane+1,100+Lane,CraneIndex+1,SlotIndex);
 }
@@ -198,12 +206,19 @@ void APortSiteLogistics::Advance(float Dt,bool Paused)
 void APortSiteLogistics::ResetLogistics()
 {
     if (!bReady) return;
-    for (auto& Job:Jobs) if (Job.Actor.IsValid()) { Job.Actor->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform); Job.Actor->Destroy(); }
-    for (const auto& Cargo:PlacedContainers) if (IsValid(Cargo)) Cargo->Destroy();
+    for (auto& Job:Jobs) if (Job.Actor.IsValid()) Job.Actor->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
     PlacedContainers.Reset();
     for (const auto& Crane:Equipment) Crane->ResetOperation();
     for (auto& Cargo:Manifest)
-    { Cargo.State=0; Cargo.HandoverMask=0; Cargo.Mesh->UpdateInstanceTransform(Cargo.Instance,Cargo.Transform,false,true,true); }
+    {
+        auto* Actor=Cargo.Actor.Get();
+        check(Actor);
+        Actor->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+        Actor->GetBody()->SetSimulatePhysics(false);
+        Actor->SetActorLocationAndRotation(Cargo.Transform.GetLocation(),Cargo.Transform.GetRotation(),false,nullptr,ETeleportType::TeleportPhysics);
+        Actor->LocationOwner=ECargoOwner::Ship;
+        Cargo.State=0; Cargo.HandoverMask=0;
+    }
     for (auto& Slot:Yard) if (Slot.Reserved)
     { Slot.Occupied=false; Slot.Mesh->UpdateInstanceTransform(Slot.Instance,SiteLogistics::Hidden(SiteLogistics::YardTransform(Slot.Position)),false,true,true); }
     for (int32 I=0;I<8;++I) { Jobs[I]=FSiteTransfer(); Vehicles[I]->ResetVehicle(QuayPark(I)); }
@@ -226,8 +241,18 @@ bool APortSiteLogistics::Validate(FString& Error) const
     if (BaselineYard-InitialYard!=InitialShipCount()) { Error=TEXT("Yard reduction does not equal vessel inventory"); return false; }
     int32 Ship=0,Active=0,Placed=0,Reserved=0,OccupiedReservations=0;
     TSet<int32> IDs,JobCargo,JobSlots,ActiveBlocks;
+    TSet<const APortContainerActor*> Actors;
+    if (ShipContainers.Num()!=Manifest.Num()) { Error=TEXT("Ship actor/manifest count mismatch" ); return false; }
     for (const auto& Cargo:Manifest)
     {
+        const auto* Actor=Cargo.Actor.Get();
+        if (!IsValid(Actor) || Actor->GetOwner()!=this || Actors.Contains(Actor) ||
+            Actor->ContainerID!=FName(*FString::Printf(TEXT("C%02d"),Cargo.ID)) || Cargo.STS<0 || Cargo.STS>=8)
+        { Error=TEXT("Missing, replaced, duplicate or unassigned ship container actor"); return false; }
+        Actors.Add(Actor);
+        if (Cargo.State==0 && (Actor->LocationOwner!=ECargoOwner::Ship || Actor->GetAttachParentActor() ||
+            Actor->GetBody()->IsSimulatingPhysics() || !Actor->GetActorLocation().Equals(Cargo.Transform.GetLocation(),.1f)))
+        { Error=TEXT("Secured ship cargo moved or lost its ship state"); return false; }
         if (IDs.Contains(Cargo.ID)) { Error=TEXT("Duplicate manifest cargo ID"); return false; }
         if (Cargo.State==2 && Cargo.HandoverMask!=7) { Error=TEXT("Delivered cargo bypassed STS/AGV/RMG handover" ); return false; }
         IDs.Add(Cargo.ID); Ship+=Cargo.State==0; Active+=Cargo.State==1; Placed+=Cargo.State==2;
@@ -246,7 +271,7 @@ bool APortSiteLogistics::Validate(FString& Error) const
         if (Job.Actor.IsValid())
         {
             ++Physical;
-            if (Job.Actor->ContainerID!=FName(*FString::Printf(TEXT("C%02d"),Manifest[Job.Cargo].ID)))
+            if (Job.Actor!=Manifest[Job.Cargo].Actor || Job.Actor->ContainerID!=FName(*FString::Printf(TEXT("C%02d"),Manifest[Job.Cargo].ID)))
             { Error=TEXT("Cargo identity changed during handover"); return false; }
             if (Job.Stage==2 && (Job.Actor->LocationOwner!=ECargoOwner::AGV || Job.Actor->GetAttachParentActor()!=Vehicles[Lane] ||
                 !Job.Actor->GetActorLocation().Equals(Vehicles[Lane]->CargoPosition(),1.f)))
@@ -269,8 +294,8 @@ bool APortSiteLogistics::Validate(FString& Error) const
 
 void APortSiteLogistics::EndPlay(const EEndPlayReason::Type Reason)
 {
-    for (auto& Job:Jobs) if (Job.Actor.IsValid()) Job.Actor->Destroy();
-    for (const auto& Cargo:PlacedContainers) if (IsValid(Cargo)) Cargo->Destroy();
+    for (const auto& Cargo:ShipContainers) if (IsValid(Cargo)) Cargo->Destroy();
+    PlacedContainers.Reset(); ShipContainers.Reset();
     for (const auto& Vehicle:Vehicles) if (IsValid(Vehicle)) Vehicle->Destroy();
     Super::EndPlay(Reason);
 }
@@ -284,7 +309,7 @@ TArray<FVector> APortSiteLogistics::Snapshot() const
 {
     TArray<FVector> Positions;
     for (const auto& Vehicle:Vehicles) Positions.Add(Vehicle->GetActorLocation());
-    for (const auto& Job:Jobs) Positions.Add(Job.Actor.IsValid()?Job.Actor->GetActorLocation():FVector::ZeroVector);
+    for (const auto& Cargo:ShipContainers) Positions.Add(Cargo->GetActorLocation());
     for (const auto& Crane:Equipment) { Positions.Add(Crane->GetActorLocation()); Positions.Add(Crane->HeadPosition()); }
     return Positions;
 }
