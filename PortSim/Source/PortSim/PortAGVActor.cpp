@@ -49,3 +49,13 @@ bool APortAGVActor::MoveToX(float X,float Dt)
     return false;
 }
 
+
+bool APortAGVActor::MoveToPosition(FVector Target,float Dt)
+{
+    const float Distance=FVector::Dist(GetActorLocation(),Target);
+    const float Desired=FMath::Min(450.f,FMath::Sqrt(2.f*180.f*Distance));
+    Speed=FMath::FInterpConstantTo(Speed,Desired,Dt,180.f);
+    SetActorLocation(FMath::VInterpConstantTo(GetActorLocation(),Target,Dt,Speed));
+    if (FVector::Dist(GetActorLocation(),Target)>.1f) return false;
+    SetActorLocation(Target); Speed=0; return true;
+}

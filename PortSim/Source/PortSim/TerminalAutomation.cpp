@@ -1,4 +1,5 @@
 #include "QuayCrane.h"
+#include "PortWorkingCrane.h"
 #include "Components/StaticMeshComponent.h"
 #include "TerminalLayout.h"
 #include "Components/TextRenderComponent.h"
@@ -46,7 +47,7 @@ void AQuayCrane::BuildTerminal()
     Box(TEXT("Quay"), FVector((TerminalLayout::QuayLeftX+TerminalLayout::QuayRightX)*0.5f,0.f,-30.f),
         FVector(TerminalLayout::QuayRightX-TerminalLayout::QuayLeftX,TerminalLayout::QuayLength,100.f));
     Box(TEXT("RailPier"), FVector(-850.f,0.f,-30.f), FVector(190.f,10000.f,100.f));
-    auto* Water = Box(TEXT("Water"), FVector(-5000.f,0.f,-260.f), FVector(9000.f,18000.f,20.f));
+    auto* Water = Box(TEXT("Water"), FVector(-30700.f,0.f,-260.f), FVector(60000.f,145000.f,20.f));
     Water->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     FActorSpawnParameters ShipParams;
     ShipParams.Owner=this;
@@ -75,6 +76,7 @@ void AQuayCrane::BuildTerminal()
     Acceleration=220.f;
     HoistSpeed=250.f;
     BuildFleet();
+    BuildTerminalSite();
 }
 
 void AQuayCrane::ResetTerminal()
@@ -82,6 +84,7 @@ void AQuayCrane::ResetTerminal()
     Suspension->BreakConstraint(); TwistLock->BreakConstraint();
     Spreader->SetSimulatePhysics(false);
     ResetFleet();
+    ResetSiteOperations();
     bLocked=false; bEmergencyStop=false; bAutoPaused=false; bAutoRunning=false;
     AutoStage=ETerminalStage::Idle; AutoQueue.Reset(); AutoCursor=0;
     AutoCompleted=0; AutoElapsed=0.f; JobElapsed=0.f; AutoStageTime=0.f; AutoStableTime=0.f;

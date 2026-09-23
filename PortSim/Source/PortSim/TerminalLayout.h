@@ -3,15 +3,17 @@
 // Centimeters. Expand inland from the quay-side rail; ship/AGV handovers stay fixed.
 namespace TerminalLayout
 {
-    constexpr float YardScale = 2.f;
+    constexpr float YardScale = 1.f;
     constexpr float NearRailX = 5500.f;
     constexpr float FarRailX = NearRailX + 4500.f * YardScale;
     constexpr float RailLength = 10000.f * YardScale;
     constexpr float BridgeCenterX = (NearRailX + FarRailX) * 0.5f;
     constexpr float BridgeWidth = FarRailX - NearRailX + 200.f;
     constexpr float QuayLeftX = -700.f;
-    constexpr float QuayRightX = FarRailX + 600.f;
-    constexpr float QuayLength = 14000.f * YardScale;
+    // DGT published area / quay length; rectangular equivalent, not a cadastral outline.
+    constexpr float SiteAreaM2 = 837201.f;
+    constexpr float QuayRightX = QuayLeftX + (SiteAreaM2 / 1050.f) * 100.f;
+    constexpr float QuayLength = 105000.f;
 
     constexpr float YardSlotX(int Index)
     {
