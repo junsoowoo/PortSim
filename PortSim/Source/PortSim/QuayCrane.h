@@ -112,6 +112,7 @@ public:
     float GetCargoMassKg() const;
 
     bool bTerminalMode = false;
+    bool bUnifiedTerminal = false;
     bool bAutoRunning = false;
     bool bAutoPaused = false;
     bool bAutoLoading = false;
@@ -145,7 +146,7 @@ private:
     bool STSLoadedHoistAllowed() const;
     UPROPERTY(VisibleInstanceOnly, Category="Terminal|Actors") TArray<TObjectPtr<APortContainerActor>> ContainerActors;
     UPROPERTY(VisibleInstanceOnly, Category="Terminal|Actors") TArray<TObjectPtr<APortAGVActor>> AGVActors;
-    UPROPERTY(VisibleInstanceOnly, Category="Terminal|Actors") TObjectPtr<APortRMGActor> RMGActor;
+    UPROPERTY(VisibleInstanceOnly, Category="Terminal|Actors") TObjectPtr<APortWorkingCrane> RMGActor;
     UPROPERTY(VisibleInstanceOnly, Category="Terminal|Actors") TObjectPtr<APortShipActor> ShipActor;
     APortContainerActor* SpawnContainer(int32 Number, FVector Position);
     bool ValidateTerminalActors(FString& Error) const;
@@ -214,13 +215,16 @@ private:
     void BuildFleet();
     void ResetFleet();
     void TickFleet(float Dt);
-    bool MoveAGV(float X, float Dt);
+    enum class EFleetDestination { Quay, Yard, Park };
+    bool MoveAGV(EFleetDestination Destination, float Dt);
     FVector AGVCargoPosition() const;
     void HoldFleetCargo(bool OnAGV);
     void ReleaseFleetCargo();
     bool TickRMGTransfer(FVector Source, FVector Destination, float Dt);
     void CompleteAutomaticJob();
-    UPROPERTY() TObjectPtr<UStaticMeshComponent> RMGSpreader;
+    int32 FleetWaypoint=0;
+    bool bFleetRouteActive=false;
+    TArray<FVector> FleetRoute;
     int32 ActiveAGV=0;
     int32 FleetStep=0;
     int32 RMGStep=0;
@@ -240,6 +244,8 @@ private:
     double AutoStageTime = 0;
     float AutoStableTime = 0.f;
     double JobElapsed = 0;
+    FVector AutoDriveTarget = FVector::ZeroVector;
+    bool bAutoDriveTarget=false;
     FVector AutoSource = FVector::ZeroVector;
     FVector AutoDestination = FVector::ZeroVector;
     FString ResultsCsv;

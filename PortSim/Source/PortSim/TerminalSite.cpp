@@ -69,7 +69,7 @@ void AQuayCrane::BuildTerminalSite()
     // Perimeter and cross-yard roads, with open access at the inland gate.
     for (float X:{145.f,650.f,775.f})
     {
-        Box(Roads,FVector(X,0,.24),FVector(18,1020,.06));
+        Box(Roads,FVector(X,0,.24),FVector(X==145.f?60.f:18.f,1020,.06));
         for (int32 I=0;I<85;++I) Box(White,FVector(X,-500+I*12,.28),FVector(.15,5,.02));
     }
     for (float Y:{-505.f,325.f,505.f})
@@ -105,22 +105,34 @@ void AQuayCrane::BuildTerminalSite()
             WorkingCranes.Add(Crane);
             Crane->Configure(WorkingCranes.Num(),false,FVector((X-13)*100,(Y-3)*100,149.5f),FVector((X+13)*100,(Y+3)*100,149.5f),false);
         }
+        for (int32 Half=0;Half<2;++Half)
+        {
+            const float HX=Half?420.f:180.f;
+            Box(Roads,FVector(HX,Y+13.2f,.25),FVector(15,3.6,.06));
+            for (float Side:{-1.f,1.f})
+                Box(White,FVector(HX,Y+13.2f+Side*1.8f,.30),FVector(15,.12,.02));
+        }
         Label(FString::Printf(TEXT("%s %02d"),Block<3?TEXT("REEFER"):TEXT("CY"),Block+1),FVector(177,Y,.4),2.5f);
     }
     int32 STSIndex=0;
-    // Eight STSs share a conserved manifest with eight AGVs and 36 yard RMGs.
-    for (float Y:{-450.f,-350.f,-250.f,-100.f,100.f,250.f,350.f,450.f})
+    const TArray<float> STSPositions=bUnifiedTerminal?
+        TArray<float>{-450,-350,-250,-100,0,100,250,350,450}:
+        TArray<float>{-450,-350,-250,-100,100,250,350,450};
+    for (float Y:STSPositions)
     {
         auto* Crane=GetWorld()->SpawnActor<APortWorkingCrane>(FVector(1200,Y*100,0),FRotator::ZeroRotator,Params);
         WorkingCranes.Add(Crane);
-        Crane->SetSTSProfile(STSProfile);
-        const float ShipDeck=FMath::Abs(Y)<200.f?200.f:440.f;
+    Crane->SetSTSProfile(STSProfile);
+        const float ShipDeck=(!bUnifiedTerminal && FMath::Abs(Y)<200.f)?200.f:440.f;
         Crane->Configure(WorkingCranes.Num(),true,FVector(-1600,(Y-8)*100,ShipDeck+129.5f),FVector(4500,(Y+8)*100,149.5f),false);
         const FVector Position(-1600,(Y-8)*100,ShipDeck+129.5f);
-        SiteLogistics->AddShipCargo(Position,STSIndex++);
+        if (!bUnifiedTerminal) SiteLogistics->AddShipCargo(Position,STSIndex);
+        ++STSIndex;
     }
-    // Two 300 x 45 m context vessels; the working ship occupies the middle berth.
-    for (float Y:{-350.f,350.f})
+    // Identical hull, deck and 11 x 16 x 3 container arrangement at every berth.
+    const TArray<float> ShipPositions=bUnifiedTerminal?TArray<float>{-350,0,350}:TArray<float>{-350,350};
+    int32 VesselIndex=0;
+    for (float Y:ShipPositions)
     {
         Box(Roads,FVector(-32,Y,-1),FVector(45,285,10));
         Box(Blue,FVector(-32,Y,4.2),FVector(43,285,.4));
@@ -131,9 +143,10 @@ void AQuayCrane::BuildTerminalSite()
                 for (int32 Tier=0;Tier<3;++Tier)
                 {
                     const FVector Position(-49+Row*3,Y-99+Bay*13,5.695+Tier*2.59);
-                    const int32 Nearest=FMath::Clamp(FMath::RoundToInt((Position.Y-(Y-100))/100.f),0,2)+(Y<0?0:5);
+                    const int32 Nearest=FMath::Clamp(FMath::RoundToInt((Position.Y-(Y-100))/100.f),0,2)+(bUnifiedTerminal?VesselIndex*3:(Y<0?0:5));
                     SiteLogistics->AddShipCargo(Position*100.,Nearest);
                 }
+        ++VesselIndex;
     }
     auto Building=[&](const TCHAR* Name,float X,float Y,FVector Size)
     {
@@ -164,6 +177,6 @@ void AQuayCrane::BuildTerminalSite()
     }
     Label(TEXT("4 GATE"),FVector(760,420,9),4.f);
     Label(TEXT("DGT | BUSAN NEW PORT 7 | 1,050 m"),FVector(72,-200,.4),5.f);
-    Label(TEXT("TRAINING BERTH"),FVector(105,0,.4),3.f);
-    SiteLogistics->Initialize(WorkingCranes,MoveTemp(YardSlots),{Blue,Yellow,Red,Green},24,FixedYard);
+    SiteLogistics->Initialize(WorkingCranes,MoveTemp(YardSlots),{Blue,Yellow,Red,Green},bUnifiedTerminal?0:24,FixedYard);
+    SiteLogistics->RegisterBerthVehicles(AGVActors);
 }

@@ -44,9 +44,9 @@ foreach ($case in $cases) {
         $reports = Get-ChildItem -LiteralPath (Join-Path $root 'Saved\Results') -Filter 'Site_*.csv' | Where-Object { $_.LastWriteTime -ge $started }
         foreach ($report in $reports) {
             $rows = @(Import-Csv -LiteralPath $report.FullName)
-            if ($rows.Count -ne 8) { continue }
+            if ($rows.Count -ne 18) { continue }
             $completed++
-            if (@($rows.STSLane | Sort-Object -Unique).Count -ne 8) { throw 'Not all eight STSs completed shipments' }
+            if (@($rows.STSLane | Sort-Object -Unique).Count -ne 9) { throw 'Not all nine STSs completed shipments' }
             foreach ($row in $rows) {
                 $duration = [double]$row.FinalPlacementAtSeconds - [double]$row.StartedAtSeconds
                 if ([Math]::Abs($duration - [double]$row.ShipmentSeconds) -gt .0001 -or
@@ -58,9 +58,9 @@ foreach ($case in $cases) {
             }
             $snapshot = Get-Content -LiteralPath ($report.FullName.Replace('.csv','_profile.json')) -Raw | ConvertFrom-Json
             if ($snapshot.sts_profile.reference.geometry.rail_gauge.value -ne 30.48) { throw 'Site reference snapshot missing' }
-            Write-Output "TIMING Site: 8 STSs delivered; final placement $($rows[-1].FinalPlacementAtSeconds) seconds"
+            Write-Output "TIMING Site: 9 STSs, 18 shipments; final placement $($rows[-1].FinalPlacementAtSeconds) seconds"
         }
-        if ($completed -ne 1) { throw 'Expected one completed eight-shipment report' }
+        if ($completed -ne 1) { throw 'Expected one completed eighteen-shipment report' }
     }
     Write-Output "PASS Site $case : $testLog"
 }

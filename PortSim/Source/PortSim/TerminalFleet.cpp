@@ -13,7 +13,6 @@ namespace Fleet
     constexpr float LiftOffset = 154.5f;
     constexpr float SafeZ = 1900.f;
     constexpr float QuayX = 3000.f;
-    constexpr float YardX = 6000.f;
     constexpr float ParkX = 4500.f;
 }
 
@@ -38,22 +37,10 @@ void AQuayCrane::BuildFleet()
         Vehicle->InitializeVehicle(I+1);
         AGVActors.Add(Vehicle);
         const float Y=-2400.f+I*2400.f;
-        Box(FString::Printf(TEXT("Road_AGV_%d"),I),RootComponent,FVector(4500,Y,22),FVector(3800,1500,3),false);
-        for (int32 Dash=0;Dash<8;++Dash)
+        Box(FString::Printf(TEXT("Road_AGV_%d"),I),RootComponent,FVector(8750,Y,22),FVector(11500,1500,3),false);
+        for (int32 Dash=0;Dash<24;++Dash)
             Box(FString::Printf(TEXT("RoadMark_%d_%d"),I,Dash),RootComponent,FVector(2800+Dash*470,Y+760,25),FVector(220,20,3),false);
     }
-    for (int32 Side:{-1,1})
-    {
-        const float X=Side<0?TerminalLayout::NearRailX:TerminalLayout::FarRailX;
-        Box(FString::Printf(TEXT("Rail_RMG_%d"),Side),RootComponent,FVector(X,0,30),FVector(35,TerminalLayout::RailLength,20),false);
-    }
-    RMGActor=GetWorld()->SpawnActor<APortRMGActor>(FVector(TerminalLayout::BridgeCenterX,0,0),FRotator::ZeroRotator,Params);
-    check(RMGActor);
-    RMGSpreader=RMGActor->GetSpreader();
-#if WITH_EDITOR
-    RMGActor->SetActorLabel(TEXT("RMG_01"));
-    RMGActor->SetFolderPath(TEXT("PortSim/Equipment"));
-#endif
     CameraArm->TargetArmLength=185000.f;
     CameraArm->SetRelativeLocation(FVector(35000,0,0));
     CameraArm->SetRelativeRotation(FRotator(-52,38,0));
@@ -71,14 +58,51 @@ void AQuayCrane::ResetFleet()
     bAGVHasCargo=false; bRMGHasCargo=false; FleetSettle=0;
     for (int32 I=0;I<AGVActors.Num();++I)
         AGVActors[I]->ResetVehicle(FVector(Fleet::ParkX,-2400+2400*I,0));
-    RMGActor->ResetCrane();
+    RMGActor=nullptr; FleetRoute.Reset(); bFleetRouteActive=false; FleetWaypoint=0;
 }
 
-bool AQuayCrane::MoveAGV(float X,float Dt)
+bool AQuayCrane::MoveAGV(EFleetDestination Destination,float Dt)
 {
-    const bool Arrived=AGVActors[ActiveAGV]->MoveToX(X,Dt);
-    if (bAGVHasCargo) Cargo->SetWorldLocationAndRotation(AGVCargoPosition(),FRotator::ZeroRotator);
-    return Arrived;
+    auto* Vehicle=AGVActors[ActiveAGV].Get();
+    const bool ToYard=Destination==EFleetDestination::Yard;
+    const float X=Destination==EFleetDestination::Park?Fleet::ParkX:Fleet::QuayX;
+    if (!bFleetRouteActive)
+    {
+        FleetRoute.Reset(); FleetWaypoint=0;
+        const FVector P=Vehicle->GetActorLocation();
+        const FVector Yard=SiteLogistics->CentralHandover(ActiveCargoIndex);
+        const FVector Quay(X,-2400.f+ActiveAGV*2400.f,0);
+        if (ToYard)
+        {
+            const float RoadX=Yard.Y+730>=P.Y?12500.f:16500.f;
+            FleetRoute.Add(FVector(RoadX,P.Y,0));
+            FleetRoute.Add(FVector(RoadX,Yard.Y+730,0));
+            FleetRoute.Add(FVector(Yard.X,Yard.Y+730,0));
+            FleetRoute.Add(Yard);
+        }
+        else if (P.X>10000.f)
+        {
+            FleetRoute.Add(FVector(Yard.X,Yard.Y+1180,0));
+            const float RoadX=Quay.Y+1200>=Yard.Y+1180?12500.f:16500.f;
+            FleetRoute.Add(FVector(RoadX,Yard.Y+1180,0));
+            FleetRoute.Add(FVector(RoadX,Quay.Y+1200,0));
+            FleetRoute.Add(FVector(Quay.X,Quay.Y+1200,0));
+            FleetRoute.Add(Quay);
+        }
+        else FleetRoute.Add(Quay);
+        bFleetRouteActive=true;
+    }
+    const bool Arrived=SiteLogistics->MoveVehicle(Vehicle,FleetRoute[FleetWaypoint],Dt);
+    if (Arrived)
+    {
+        if (FleetRoute.Num()>1 && FleetWaypoint==0 && ToYard) Vehicle->SetActorRotation(FRotator(0,90,0));
+        if (FleetRoute.Num()>1 && FleetWaypoint==FleetRoute.Num()-1 && !ToYard) Vehicle->SetActorRotation(FRotator::ZeroRotator);
+        ++FleetWaypoint;
+    }
+    if (bAGVHasCargo) Cargo->SetWorldLocationAndRotation(AGVCargoPosition(),Vehicle->GetActorRotation());
+    if (FleetWaypoint<FleetRoute.Num()) return false;
+    bFleetRouteActive=false;
+    return true;
 }
 
 void AQuayCrane::HoldFleetCargo(bool OnAGV)
@@ -101,47 +125,39 @@ void AQuayCrane::ReleaseFleetCargo()
 
 bool AQuayCrane::TickRMGTransfer(FVector Source,FVector Destination,float Dt)
 {
-    FVector Target=RMGSpreader->GetComponentLocation();
-    switch(RMGStep)
+    auto* Container=ContainerActors[ActiveCargoIndex].Get();
+    if (RMGStep==0)
     {
-    case 0: Target.Z=Fleet::SafeZ; break;
-    case 1: Target=FVector(Source.X,Source.Y,Fleet::SafeZ); break;
-    case 2: Target=Source+FVector(0,0,Fleet::LiftOffset); break;
-    case 3: Target=FVector(Source.X,Source.Y,Fleet::SafeZ); break;
-    case 4: Target=FVector(Destination.X,Destination.Y,Fleet::SafeZ); break;
-    case 5: Target=Destination+FVector(0,0,Fleet::LiftOffset); break;
-    case 6: Target=FVector(Destination.X,Destination.Y,Fleet::SafeZ); break;
-    default: return true;
+        if (bLocked || AGVActors[ActiveAGV]->Speed>0 || FVector::Dist(Cargo->GetComponentLocation(),Source)>20.f)
+        { StopAutomatic(TEXT("Yard RMG pickup alignment / AGV stop.")); return false; }
+        if (!RMGActor->AssignCargo(Container,Source,Destination,bAutoLoading,!bAutoLoading))
+        { StopAutomatic(TEXT("Reserved yard RMG could not accept cargo.")); return false; }
+        bAGVHasCargo=false; RMGStep=1;
     }
-    const bool Arrived=RMGActor->MoveSpreaderTo(Target,Dt);
-    if (bRMGHasCargo) Cargo->SetWorldLocationAndRotation(RMGSpreader->GetComponentLocation()-FVector(0,0,Fleet::LiftOffset),FRotator::ZeroRotator);
-    if (!Arrived) return false;
-    if (RMGStep==2)
+    RMGActor->Advance(Dt,false);
+    bRMGHasCargo=RMGActor->bCarrying;
+    if (!RMGActor->Fault.IsEmpty()) { StopAutomatic(RMGActor->Fault); return false; }
+    if (RMGActor->IsBusy()) return false;
+    bRMGHasCargo=false;
+    if (bAutoLoading) HoldFleetCargo(true);
+    else
     {
-        if (bLocked || AGVActors[ActiveAGV]->Speed>0 || FVector::Dist(Cargo->GetComponentLocation(),Source)>20.f || Cargo->GetUpVector().Z<.99f)
-        { StopAutomatic(TEXT("RMG pickup interlock: cargo alignment / AGV stop.")); return false; }
-        HoldFleetCargo(false);
-    }
-    if (RMGStep==5)
-    {
-        if (!bAutoLoading && !IsTerminalSlotAvailable(ActiveCargoIndex,false))
-        { StopAutomatic(TEXT("RMG destination slot occupied.")); return false; }
-        if (bAutoLoading) { bRMGHasCargo=false; bAGVHasCargo=true; ContainerActors[ActiveCargoIndex]->LocationOwner=ECargoOwner::AGV; }
-        else ReleaseFleetCargo();
+        Cargo->SetSimulatePhysics(false);
+        Container->LocationOwner=ECargoOwner::Yard;
     }
     ++RMGStep;
-    return RMGStep>6;
+    return true;
 }
 
 void AQuayCrane::TickFleet(float Dt)
 {
-    // A single job reserves the STS/AGV/RMG handover corridor until committed.
-    // Three separated lanes never intersect. Vehicles are omnidirectional shuttle blockouts.
+    // Use the site block and road reservations for both berth and site traffic.
+    if (!SiteLogistics->ReserveCentral(ActiveCargoIndex)) return;
     if (AutoStage==ETerminalStage::FleetPrepare)
     {
         if (FleetStep==0)
         {
-            if (!MoveAGV(bAutoLoading?Fleet::YardX:Fleet::QuayX,Dt)) return;
+            if (!MoveAGV(bAutoLoading?EFleetDestination::Yard:EFleetDestination::Quay,Dt)) return;
             if (!bAutoLoading) { SetAutoStage(ETerminalStage::RaiseEmpty); return; }
             FleetStep=1;
         }
@@ -151,7 +167,7 @@ void AQuayCrane::TickFleet(float Dt)
         }
         else if (FleetStep==2)
         {
-            if (MoveAGV(Fleet::QuayX,Dt)) { ReleaseFleetCargo(); FleetStep=3; FleetSettle=0; }
+            if (MoveAGV(EFleetDestination::Quay,Dt)) { ReleaseFleetCargo(); FleetStep=3; FleetSettle=0; }
         }
         else if (FleetStep==3)
         {
@@ -168,12 +184,12 @@ void AQuayCrane::TickFleet(float Dt)
     {
         if (bAutoLoading)
         {
-            if (MoveAGV(Fleet::ParkX,Dt)) CompleteAutomaticJob();
+            if (MoveAGV(EFleetDestination::Park,Dt)) CompleteAutomaticJob();
             return;
         }
         if (FleetStep==0)
         {
-            if (MoveAGV(Fleet::YardX,Dt)) { FleetStep=1; RMGStep=0; }
+            if (MoveAGV(EFleetDestination::Yard,Dt)) { FleetStep=1; RMGStep=0; }
         }
         else if (FleetStep==1)
         {
@@ -186,12 +202,17 @@ void AQuayCrane::TickFleet(float Dt)
             FleetSettle=Stable?FleetSettle+Dt:0;
             if (FleetSettle>1.f) { ContainerActors[ActiveCargoIndex]->LocationOwner=ECargoOwner::Yard; JobPlacementAt=AutoElapsed; FleetStep=3; }
         }
-        else if (FleetStep==3 && MoveAGV(Fleet::ParkX,Dt)) CompleteAutomaticJob();
+        else if (FleetStep==3 && MoveAGV(EFleetDestination::Park,Dt)) CompleteAutomaticJob();
     }
 }
 
 FString AQuayCrane::GetFleetStatus() const
 {
+    if (bUnifiedTerminal && SiteLogistics)
+        return FString::Printf(TEXT("Ship %d / %d | Transit %d | Yard %d | Delivered %d | %s"),
+            SiteLogistics->ShipRemaining(),SiteLogistics->InitialShipCount(),SiteLogistics->InTransit(),
+            SiteLogistics->InitialYard+SiteLogistics->Delivered,SiteLogistics->Delivered,
+            SiteLogistics->Fault.IsEmpty()?TEXT("STS > AGV > RMG"):*SiteLogistics->Fault);
     if (AGVActors.IsEmpty()) return TEXT("");
     if (SiteLogistics)
     {

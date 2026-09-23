@@ -24,6 +24,7 @@ public:
     bool HasSTSProfile() const { return STSProfile.bReady; }
     double LastJobSeconds=0, LastPausedSeconds=0;
     FSTSObservation Observation;
+    void SetDestinationReady(bool Ready) { bDestinationReady=Ready; }
     bool IsBusy() const { return bJobActive; }
     UFUNCTION(BlueprintCallable, Category="Operation") void ResetOperation();
     UFUNCTION(BlueprintCallable, Category="Operation") void SetOperationPaused(bool Paused);
@@ -79,6 +80,7 @@ private:
     bool bConfigured=false;
     bool bExternalJobs=false;
     bool bJobActive=false;
+    bool bDestinationReady=true;
     FVector JobStartHead=FVector::ZeroVector;
     FVector Local(FVector World) const;
     bool MoveHead(FVector Target, float Dt);
