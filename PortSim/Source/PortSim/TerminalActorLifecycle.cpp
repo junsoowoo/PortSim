@@ -20,6 +20,12 @@ APortContainerActor* AQuayCrane::SpawnContainer(int32 Number,FVector Position)
 
 bool AQuayCrane::ValidateTerminalActors(FString& Error) const
 {
+    if (bUnifiedTerminal)
+    {
+        if (!IsValid(SiteLogistics) || WorkingCranes.Num()!=45 || ContainerActors.Num()!=0 || AGVActors.Num()!=0 || ShipActor)
+        { Error=TEXT("Legacy central berth still exists or unified equipment count is wrong"); return false; }
+        return SiteLogistics->Validate(Error);
+    }
     const int32 Expected=bTerminalMode?24:1;
     if (ContainerActors.Num()!=Expected) { Error=TEXT("Container actor count mismatch"); return false; }
     TSet<FName> IDs;

@@ -83,7 +83,7 @@ private:
     TMap<int32,FBox> RoadReservations;
     TSet<int32> FinishedRoadSegments;
     TArray<bool> SlotAssigned;
-    int32 CentralCount=0, Dispatched=0;
+    int32 CentralCount=0, Dispatched=0, LaneCount=8;
     bool bReady=false, bWasPaused=false;
     void Dispatch(int32 Lane);
     void PrepareNextCargo(int32 Lane);

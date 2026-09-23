@@ -16,7 +16,7 @@ void AQuayCrane::TickSiteOperations(float Dt)
     if (!SiteLogistics || (bTerminalTest && !FParse::Param(FCommandLine::Get(),TEXT("PortSimMixedTest")))) return;
     if (bTerminalTest) SiteLogistics->DispatchLimit=16;
     const bool Testing=FParse::Param(FCommandLine::Get(),TEXT("PortSimSiteTest"));
-    if (Testing) SiteLogistics->DispatchLimit=16;
+    if (Testing) SiteLogistics->DispatchLimit=SiteLogistics->Vehicles.Num()*2;
     SiteLogistics->Advance(Dt,bAutoPaused || bEmergencyStop);
     if (Testing) TickSiteTest(Dt);
 }
@@ -56,15 +56,15 @@ void AQuayCrane::TickSiteTest(float Dt)
         { Finish(false,TEXT("In-transit reset: ")+Error); return; }
         SiteTestStage=5;
     }
-    else if (SiteTestStage==5 && SiteLogistics->Delivered==16 && SiteLogistics->IsIdle())
+    else if (SiteTestStage==5 && SiteLogistics->Delivered==SiteLogistics->Vehicles.Num()*2 && SiteLogistics->IsIdle())
     {
         for (const auto& Vehicle:SiteLogistics->Vehicles)
-            if (Vehicle->CompletedJobs<1) { Finish(false,TEXT("Not all eight AGVs performed a handover")); return; }
-        if (SiteLogistics->PeakMovingVehicles<2 || SiteLogistics->PrefetchedJobs<6)
+            if (Vehicle->CompletedJobs<1) { Finish(false,TEXT("Not every AGV performed a handover")); return; }
+        if (SiteLogistics->PeakMovingVehicles<2 || SiteLogistics->PrefetchedJobs<(bUnifiedTerminal?9:6))
         { Finish(false,TEXT("AGVs did not move concurrently or STSs did not prepare ahead")); return; }
         UE_LOG(LogTemp,Display,TEXT("DISPATCH_METRICS: peak_moving_agvs=%d prefetched_jobs=%d"),SiteLogistics->PeakMovingVehicles,SiteLogistics->PrefetchedJobs);
-        const FString Summary=FString::Printf(TEXT("yard %d -> %d (removed %d = all vessel cargo); all 1064 site ship containers exist as actors from startup and survive reset; 16 complete STS/AGV/RMG shipments with concurrent AGVs and STS prefetch retain their original actors and IDs; road/slot reservations, physical placement, return, pause/E-stop and in-transit reset"),
-            SiteLogistics->BaselineYard,SiteLogistics->InitialYard,SiteLogistics->InitialShipCount());
+        const FString Summary=FString::Printf(TEXT("yard %d -> %d; %d vessel containers; %d AGVs, %d complete STS/AGV/RMG shipments; equal vessel inventories, concurrent traffic, STS prefetch, physical placement, pause/E-stop and reset"),
+            SiteLogistics->BaselineYard,SiteLogistics->InitialYard,SiteLogistics->InitialShipCount(),SiteLogistics->Vehicles.Num(),SiteLogistics->Delivered);
         SiteLogistics->ResetLogistics();
         if (!SiteLogistics->Validate(Error) || SiteLogistics->Delivered || SiteLogistics->InTransit())
         { Finish(false,TEXT("Completed reset: ")+Error); return; }

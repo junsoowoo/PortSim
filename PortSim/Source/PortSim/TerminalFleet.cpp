@@ -208,6 +208,11 @@ void AQuayCrane::TickFleet(float Dt)
 
 FString AQuayCrane::GetFleetStatus() const
 {
+    if (bUnifiedTerminal && SiteLogistics)
+        return FString::Printf(TEXT("Ship %d / %d | Transit %d | Yard %d | Delivered %d | %s"),
+            SiteLogistics->ShipRemaining(),SiteLogistics->InitialShipCount(),SiteLogistics->InTransit(),
+            SiteLogistics->InitialYard+SiteLogistics->Delivered,SiteLogistics->Delivered,
+            SiteLogistics->Fault.IsEmpty()?TEXT("STS > AGV > RMG"):*SiteLogistics->Fault);
     if (AGVActors.IsEmpty()) return TEXT("");
     if (SiteLogistics)
     {

@@ -210,6 +210,7 @@ void AQuayCrane::BeginPlay()
     bSmokeTest = FParse::Param(FCommandLine::Get(), TEXT("PortSimSmokeTest"));
     bTerminalTest = FParse::Param(FCommandLine::Get(), TEXT("PortSimTerminalTest")) || FParse::Param(FCommandLine::Get(),TEXT("PortSimFleetResetTest"));
     bTerminalMode = !bSmokeTest;
+    bUnifiedTerminal=bTerminalMode && !bTerminalTest && !FParse::Param(FCommandLine::Get(),TEXT("PortSimLegacyTerminal"));
     if (FParse::Param(FCommandLine::Get(),TEXT("PortSimSpeedTest")))
     {
         bool Pass=true;
@@ -232,10 +233,10 @@ void AQuayCrane::BeginPlay()
     }
     if (!bTerminalMode) Cargo=SpawnContainer(1,Crane::CargoStart)->GetBody();
 #if WITH_EDITOR
-    SetActorLabel(TEXT("STS_01"));
+    SetActorLabel(bUnifiedTerminal?TEXT("Terminal_Camera_Controller"):TEXT("STS_01"));
     SetFolderPath(TEXT("PortSim/Equipment"));
 #endif
-    Tags.AddUnique(TEXT("PortSim.STS"));
+    Tags.AddUnique(bUnifiedTerminal?TEXT("PortSim.TerminalController"):TEXT("PortSim.STS"));
     BuildYard();
     ApplyAppearance();
     ResetSimulation();
@@ -246,7 +247,7 @@ void AQuayCrane::BeginPlay()
         ResetSimulation();
         Pass=ValidateTerminalActors(Error) && Pass;
         UE_LOG(LogPortSimCrane,Display,TEXT("PORTSIM_ACTORS_%s: %s"),Pass?TEXT("PASS"):TEXT("FAIL"),
-            Pass?TEXT("24 berth container actors, 3 berth AGVs, 36 yard RMGs, no central RMG, 1 berth ship, STS; independent roots/components/IDs; reset preserves actors"):*Error);
+            Pass?TEXT("Terminal actor ownership, vessel inventory, equipment counts and reset verified"):*Error);
         FPlatformMisc::RequestExitWithStatus(false,Pass?0:1);
     }
     if (bTerminalMode && !bTerminalTest && !FParse::Param(FCommandLine::Get(),TEXT("PortSimSiteTest"))) StartAutomatic(false);
@@ -309,6 +310,7 @@ void AQuayCrane::SetDriveInput(float Trolley, float Gantry, float Hoist)
 
 void AQuayCrane::ToggleLock()
 {
+    if (bUnifiedTerminal || !Cargo) return;
     if (bLocked)
     {
         TwistLock->BreakConstraint();
@@ -354,7 +356,7 @@ float AQuayCrane::GetSwayDegrees() const
 
 float AQuayCrane::GetLoadHeight() const
 {
-    return (Cargo->GetComponentLocation().Z - Crane::CargoHalfHeight - 20.f) / 100.f;
+    return Cargo?(Cargo->GetComponentLocation().Z - Crane::CargoHalfHeight - 20.f) / 100.f:0.f;
 }
 
 void AQuayCrane::UpdateRopes()
@@ -380,7 +382,7 @@ void AQuayCrane::Tick(float DeltaSeconds)
     const double WallNow=FPlatformTime::Seconds();
     const float WallDt=static_cast<float>(FMath::Clamp(WallNow-PreviousWallTick,0.0,0.1));
     PreviousWallTick=WallNow;
-    if (!PlaybackTracePath.IsEmpty())
+    if (!PlaybackTracePath.IsEmpty() && Cargo)
     {
         const FVector S=Spreader->GetComponentLocation();
         const FVector C=Cargo->GetComponentLocation();
@@ -456,7 +458,7 @@ void AQuayCrane::Tick(float DeltaSeconds)
         if (bTerminalMode && PC->WasInputKeyJustPressed(EKeys::Home))
         { CameraArm->SetRelativeLocation(FVector(35000,0,0)); CameraArm->TargetArmLength=185000.f; CameraArm->SetRelativeRotation(FRotator(-52,38,0)); }
         if (bTerminalMode && PC->WasInputKeyJustPressed(EKeys::End))
-        { CameraArm->SetRelativeLocation(FVector(5500,0,500)); CameraArm->TargetArmLength=22000.f; }
+        { CameraArm->SetRelativeLocation(FVector(12000,0,500)); CameraArm->TargetArmLength=bUnifiedTerminal?65000.f:22000.f; }
         if (bTerminalMode && PC->WasInputKeyJustPressed(EKeys::Tab)) FocusNextSiteCrane();
         const float Orbit = Axis(EKeys::Right, EKeys::Left);
         const float Pitch = Axis(EKeys::Up, EKeys::Down);
@@ -465,6 +467,20 @@ void AQuayCrane::Tick(float DeltaSeconds)
         Rotation.Pitch = FMath::Clamp(Rotation.Pitch + Pitch * 25.f * WallDt, -80.f, -8.f);
         CameraArm->SetRelativeRotation(Rotation);
         CameraArm->TargetArmLength = FMath::Clamp(CameraArm->TargetArmLength + Axis(EKeys::PageDown, EKeys::PageUp) * FMath::Max(2500.f, CameraArm->TargetArmLength * .65f) * WallDt, 2500.f, bTerminalMode ? 220000.f : 42000.f);
+    }
+    if (bUnifiedTerminal)
+    {
+        SiteLogistics->BeginTrafficFrame();
+        if (bAutoRunning && !bAutoPaused && !bEmergencyStop && SiteLogistics->Fault.IsEmpty()) AutoElapsed+=Dt;
+        TickSiteOperations(Dt);
+        AutoCompleted=Deliveries=SiteLogistics->Delivered;
+        if (bAutoRunning && SiteLogistics->ShipRemaining()==0 && SiteLogistics->IsIdle())
+        {
+            bAutoRunning=false;
+            Status=FString::Printf(TEXT("All three ships unloaded: %d containers, %.1f simulation seconds"),Deliveries,AutoElapsed);
+            UE_LOG(LogPortSimCrane,Display,TEXT("TERMINAL_ALL_UNLOADED: %d containers in %.2f simulation seconds"),Deliveries,AutoElapsed);
+        }
+        return;
     }
     bAutoDriveTarget=false;
     if (SiteLogistics) SiteLogistics->BeginTrafficFrame();
@@ -677,6 +693,17 @@ void APortSimHUD::DrawHUD()
     Line(TEXT("항만 시뮬레이터"), FLinearColor(0.2f, 0.8f, 1.f), 1.4f);
     Line(FString::Printf(TEXT("SPEED %.0fx [%d/%d] | actual %.1fx | +/- speed | 0 reset"),
         CranePawn->SimulationSpeed, CranePawn->GetSimulationSpeedStep()+1, Crane::SpeedLevelCount, CranePawn->GetActualPlaybackRate()), FLinearColor(1.f,0.85f,0.25f),1.1f);
+    if (CranePawn->bUnifiedTerminal)
+    {
+        Line(CranePawn->GetFleetStatus(),FLinearColor(0.3f,0.8f,1.f));
+        Line(TEXT("3 ships x 528 containers | 9 STS / 9 AGV / 36 RMG"),FLinearColor::White);
+        Line(TEXT("P pause/resume | Space E-stop | R reset | U resume unloading"),FLinearColor(0.3f,1.f,0.7f));
+        Line(TEXT("Home overview | End middle berth | Tab next crane"),FLinearColor::White);
+        Line(FString::Printf(TEXT("Elapsed %.1f s | %s"),CranePawn->AutoElapsed,
+            CranePawn->bEmergencyStop?TEXT("E-STOP"):CranePawn->bAutoPaused?TEXT("PAUSED"):TEXT("RUNNING")),FLinearColor::White);
+        Line(CranePawn->Status,FLinearColor(0.4f,1.f,0.65f));
+        return;
+    }
     if (CranePawn->bTerminalMode)
     {
         Line(CranePawn->GetFleetStatus(), FLinearColor(0.3f,0.8f,1.f));

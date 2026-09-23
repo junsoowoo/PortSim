@@ -8,7 +8,8 @@
 
 namespace SiteLogistics
 {
-    constexpr float CraneY[]={-450,-350,-250,-100,100,250,350,450};
+    constexpr float CraneY[]={-450,-350,-250,-100,0,100,250,350,450};
+    constexpr float LegacyCraneY[]={-450,-350,-250,-100,100,250,350,450};
     FTransform Hidden(FTransform T) { T.SetScale3D(FVector::ZeroVector); return T; }
     FTransform YardTransform(FVector P) { return FTransform(FQuat::Identity,P,FVector(12.192,2.438,2.59)); }
 }
@@ -17,7 +18,7 @@ APortSiteLogistics::APortSiteLogistics() { PrimaryActorTick.bCanEverTick=false; 
 
 void APortSiteLogistics::AddShipCargo(FVector Position,int32 STS)
 {
-    check(STS>=0 && STS<8);
+    check(STS>=0 && STS<9);
     FSiteShipCargo Record;
     Record.Transform=FTransform(FQuat::Identity,Position);
     Record.STS=STS; Record.ID=2000+Manifest.Num();
@@ -34,17 +35,17 @@ void APortSiteLogistics::AddShipCargo(FVector Position,int32 STS)
     Manifest.Add(Record);
 }
 FVector APortSiteLogistics::QuayPark(int32 Lane) const
-{ return FVector(4500,(SiteLogistics::CraneY[Lane]+8)*100,0); }
+{ return FVector(4500,((LaneCount==9?SiteLogistics::CraneY[Lane]:SiteLogistics::LegacyCraneY[Lane])+8)*100,0); }
 FVector APortSiteLogistics::YardHandover(const FSiteYardSlot& Slot) const
 { return FVector(Slot.Half?42000:18000,(-460+Slot.Block*44+13.2f)*100,0); }
 
 void APortSiteLogistics::Initialize(const TArray<TObjectPtr<APortWorkingCrane>>& Cranes,TArray<FSiteYardSlot> Slots,
     const TArray<UHierarchicalInstancedStaticMeshComponent*>& Palette,int32 CentralCargo,int32 FixedYard)
 {
-    Equipment=Cranes; Yard=MoveTemp(Slots); CentralCount=CentralCargo;
+    Equipment=Cranes; Yard=MoveTemp(Slots); CentralCount=CentralCargo; LaneCount=Equipment.Num()-36;
     BaselineYard=Yard.Num()+FixedYard;
     InitialYard=BaselineYard-InitialShipCount();
-    check(Equipment.Num()==44 && Yard.Num()>InitialShipCount());
+    check((LaneCount==8 || LaneCount==9) && Yard.Num()>InitialShipCount());
     // Remove TOP tiers only; filling the reservation bottom-up restores supported stacks.
     Yard.StableSort([](const FSiteYardSlot& A,const FSiteYardSlot& B) { return A.Position.Z==B.Position.Z ? A.Position.X<B.Position.X : A.Position.Z>B.Position.Z; });
     for (int32 I=0;I<Yard.Num();++I)
@@ -66,11 +67,11 @@ void APortSiteLogistics::Initialize(const TArray<TObjectPtr<APortWorkingCrane>>&
     }
     // Upper ship tiers leave first, so no boxes are lifted through an upper stack.
     Manifest.StableSort([](const FSiteShipCargo& A,const FSiteShipCargo& B) { return A.Transform.GetLocation().Z>B.Transform.GetLocation().Z; });
-    Jobs.SetNum(8); BlocksBusy.Init(false,18); RMGBusy.Init(false,36);
-    PreparedCargo.Init(INDEX_NONE,8); SlotAssigned.Init(false,Yard.Num());
+    Jobs.SetNum(LaneCount); BlocksBusy.Init(false,18); RMGBusy.Init(false,36);
+    PreparedCargo.Init(INDEX_NONE,LaneCount); SlotAssigned.Init(false,Yard.Num());
     FActorSpawnParameters Params; Params.Owner=this;
     Params.SpawnCollisionHandlingOverride=ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-    for (int32 I=0;I<8;++I)
+    for (int32 I=0;I<LaneCount;++I)
     {
         auto* Vehicle=GetWorld()->SpawnActor<APortAGVActor>(QuayPark(I),FRotator::ZeroRotator,Params);
         Vehicle->InitializeVehicle(100+I); Vehicles.Add(Vehicle);
@@ -299,8 +300,8 @@ void APortSiteLogistics::ResetLogistics()
     }
     for (auto& Slot:Yard) if (Slot.Reserved)
     { Slot.Occupied=false; Slot.Mesh->UpdateInstanceTransform(Slot.Instance,SiteLogistics::Hidden(SiteLogistics::YardTransform(Slot.Position)),false,true,true); }
-    for (int32 I=0;I<8;++I) { Jobs[I]=FSiteTransfer(); Vehicles[I]->ResetVehicle(QuayPark(I)); }
-    BlocksBusy.Init(false,18); RMGBusy.Init(false,36); PreparedCargo.Init(INDEX_NONE,8); SlotAssigned.Init(false,Yard.Num());
+    for (int32 I=0;I<LaneCount;++I) { Jobs[I]=FSiteTransfer(); Vehicles[I]->ResetVehicle(QuayPark(I)); }
+    BlocksBusy.Init(false,18); RMGBusy.Init(false,36); PreparedCargo.Init(INDEX_NONE,LaneCount); SlotAssigned.Init(false,Yard.Num());
     CentralReservation=CentralPending=INDEX_NONE;
     RoadReservations.Reset(); FinishedRoadSegments.Reset(); PeakMovingVehicles=PrefetchedJobs=Dispatched=Delivered=0; Fault.Empty(); bWasPaused=false;
 }
@@ -319,6 +320,17 @@ bool APortSiteLogistics::Validate(FString& Error) const
 {
     if (!Fault.IsEmpty()) { Error=Fault; return false; }
     if (BaselineYard-InitialYard!=InitialShipCount()) { Error=TEXT("Yard reduction does not equal vessel inventory"); return false; }
+    if (LaneCount==9)
+    {
+        int32 VesselCounts[3]={0,0,0};
+        for (const auto& Cargo:Manifest)
+        {
+            if (Cargo.STS<0 || Cargo.STS>=9) { Error=TEXT("Invalid berth STS assignment"); return false; }
+            ++VesselCounts[Cargo.STS/3];
+        }
+        if (CentralCount!=0 || VesselCounts[0]!=528 || VesselCounts[1]!=528 || VesselCounts[2]!=528 || Vehicles.Num()!=9)
+        { Error=TEXT("Three equal vessels / unified fleet inventory mismatch"); return false; }
+    }
     int32 Ship=0,Active=0,Placed=0,Reserved=0,OccupiedReservations=0,CentralOccupied=0;
     TSet<int32> IDs,JobCargo,JobSlots,ActiveRMGs;
     TSet<const APortContainerActor*> Actors;
@@ -327,7 +339,7 @@ bool APortSiteLogistics::Validate(FString& Error) const
     {
         const auto* Actor=Cargo.Actor.Get();
         if (!IsValid(Actor) || Actor->GetOwner()!=this || Actors.Contains(Actor) ||
-            Actor->ContainerID!=FName(*FString::Printf(TEXT("C%02d"),Cargo.ID)) || Cargo.STS<0 || Cargo.STS>=8)
+            Actor->ContainerID!=FName(*FString::Printf(TEXT("C%02d"),Cargo.ID)) || Cargo.STS<0 || Cargo.STS>=LaneCount)
         { Error=TEXT("Missing, replaced, duplicate or unassigned ship container actor"); return false; }
         Actors.Add(Actor);
         if (Cargo.State==0 && (Actor->LocationOwner!=ECargoOwner::Ship || Actor->GetAttachParentActor() ||
@@ -348,7 +360,7 @@ bool APortSiteLogistics::Validate(FString& Error) const
         { Error=TEXT("Duplicate or unreserved central yard destination"); return false; }
         CentralIDs.Add(Slot); CentralBlocks.Add(Yard[Slot].Block);
     }
-    if (CentralBlocks.Num()!=18) { Error=TEXT("Berth cargo must be distributed across all 18 yards"); return false; }
+    if (CentralCount>0 && CentralBlocks.Num()!=18) { Error=TEXT("Berth cargo must be distributed across all 18 yards"); return false; }
     if (CentralReservation!=INDEX_NONE)
     {
         if (!BlocksBusy[Yard[CentralSlots[CentralReservation]].Block])

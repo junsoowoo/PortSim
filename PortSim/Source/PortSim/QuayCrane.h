@@ -109,6 +109,7 @@ public:
     float GetLoadHeight() const;
 
     bool bTerminalMode = false;
+    bool bUnifiedTerminal = false;
     bool bAutoRunning = false;
     bool bAutoPaused = false;
     bool bAutoLoading = false;

@@ -33,6 +33,20 @@ FVector AQuayCrane::TerminalSlot(int32 Index, bool bShip) const
 
 void AQuayCrane::BuildTerminal()
 {
+    if (bUnifiedTerminal)
+    {
+        // Camera/UI pawn only; all nine operational STSs use the common crane actor.
+        Suspension->BreakConstraint(); TwistLock->BreakConstraint();
+        Spreader->SetSimulatePhysics(false);
+        TInlineComponentArray<UStaticMeshComponent*> TrainingParts(this);
+        for (auto* Part:TrainingParts)
+        {
+            Part->SetSimulatePhysics(false);
+            Part->SetHiddenInGame(true);
+            Part->SetVisibility(false);
+            Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        }
+    }
     auto Box = [this](const FString& Name, FVector Position, FVector Size)
     {
         auto* Mesh = NewObject<UStaticMeshComponent>(this, FName(*Name));
@@ -47,9 +61,17 @@ void AQuayCrane::BuildTerminal()
     };
     Box(TEXT("Quay"), FVector((TerminalLayout::QuayLeftX+TerminalLayout::QuayRightX)*0.5f,0.f,-30.f),
         FVector(TerminalLayout::QuayRightX-TerminalLayout::QuayLeftX,TerminalLayout::QuayLength,100.f));
-    Box(TEXT("RailPier"), FVector(-850.f,0.f,-30.f), FVector(190.f,10000.f,100.f));
     auto* Water = Box(TEXT("Water"), FVector(-30700.f,0.f,-260.f), FVector(60000.f,145000.f,20.f));
     Water->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    if (bUnifiedTerminal)
+    {
+        BuildTerminalSite();
+        CameraArm->TargetArmLength=185000.f;
+        CameraArm->SetRelativeLocation(FVector(35000,0,0));
+        CameraArm->SetRelativeRotation(FRotator(-52,38,0));
+        return;
+    }
+    Box(TEXT("RailPier"), FVector(-850.f,0.f,-30.f), FVector(190.f,10000.f,100.f));
     FActorSpawnParameters ShipParams;
     ShipParams.Owner=this;
     ShipParams.SpawnCollisionHandlingOverride=ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -80,6 +102,14 @@ void AQuayCrane::BuildTerminal()
 
 void AQuayCrane::ResetTerminal()
 {
+    if (bUnifiedTerminal)
+    {
+        ResetSiteOperations();
+        bLocked=bEmergencyStop=bAutoPaused=bAutoLoading=false; bAutoRunning=true;
+        AutoStage=ETerminalStage::Idle; AutoCompleted=Deliveries=0; AutoElapsed=0;
+        Status=TEXT("Three equal berths: automatic STS > AGV > available yard RMG");
+        return;
+    }
     Suspension->BreakConstraint(); TwistLock->BreakConstraint();
     Spreader->SetSimulatePhysics(false);
     ResetFleet();
@@ -112,6 +142,7 @@ void AQuayCrane::ResetTerminal()
 
 int32 AQuayCrane::GetShipCargoCount() const
 {
+    if (bUnifiedTerminal) return SiteLogistics?SiteLogistics->ShipRemaining():0;
     int32 Count=0; for (bool bShip: CargoOnShip) if (bShip) ++Count; return Count;
 }
 
@@ -166,6 +197,13 @@ bool AQuayCrane::IsTerminalSlotAvailable(int32 Index,bool bShip) const
 void AQuayCrane::StartAutomatic(bool bLoad)
 {
     if (!bTerminalMode) return;
+    if (bUnifiedTerminal)
+    {
+        if (bLoad) { Status=TEXT("Unified berths unload automatically; R restores all three ships."); return; }
+        if (bEmergencyStop || !SiteLogistics->Fault.IsEmpty()) { Status=TEXT("Clear E-stop or reset after a fault."); return; }
+        bAutoPaused=false; bAutoRunning=true;
+        return;
+    }
     if (bAutoRunning) { Status=TEXT("A batch is already running. P pauses; R resets. Direction is unchanged."); return; }
     if (bLocked || bEmergencyStop || AutoStage==ETerminalStage::Fault)
     { Status=TEXT("Cannot start: release manual cargo / clear E-stop, or R after a fault."); return; }
