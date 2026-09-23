@@ -1,4 +1,5 @@
 #include "QuayCrane.h"
+#include "PortSiteLogistics.h"
 #include "PortSimTimeStep.h"
 #include "Misc/FileHelper.h"
 #include "HAL/PlatformTime.h"
@@ -180,7 +181,6 @@ void AQuayCrane::ApplyAppearance()
         Meshes.Append(Parts);
     };
     for (const auto& Vehicle:AGVActors) AddEquipmentMeshes(Vehicle);
-    AddEquipmentMeshes(RMGActor);
     AddEquipmentMeshes(ShipActor);
     for (auto* Mesh : Meshes)
     {
@@ -246,7 +246,7 @@ void AQuayCrane::BeginPlay()
         ResetSimulation();
         Pass=ValidateTerminalActors(Error) && Pass;
         UE_LOG(LogPortSimCrane,Display,TEXT("PORTSIM_ACTORS_%s: %s"),Pass?TEXT("PASS"):TEXT("FAIL"),
-            Pass?TEXT("24 container actors, 3 AGV actors, 1 RMG, 1 ship, STS; independent roots/components/IDs; reset preserves actors"):*Error);
+            Pass?TEXT("24 berth container actors, 3 berth AGVs, 36 yard RMGs, no central RMG, 1 berth ship, STS; independent roots/components/IDs; reset preserves actors"):*Error);
         FPlatformMisc::RequestExitWithStatus(false,Pass?0:1);
     }
     if (bTerminalMode && !bTerminalTest && !FParse::Param(FCommandLine::Get(),TEXT("PortSimSiteTest"))) StartAutomatic(false);
@@ -466,19 +466,28 @@ void AQuayCrane::Tick(float DeltaSeconds)
         CameraArm->SetRelativeRotation(Rotation);
         CameraArm->TargetArmLength = FMath::Clamp(CameraArm->TargetArmLength + Axis(EKeys::PageDown, EKeys::PageUp) * FMath::Max(2500.f, CameraArm->TargetArmLength * .65f) * WallDt, 2500.f, bTerminalMode ? 220000.f : 42000.f);
     }
+    bAutoDriveTarget=false;
+    if (SiteLogistics) SiteLogistics->BeginTrafficFrame();
     if (bTerminalMode) { TickAutomatic(Dt); TickSiteOperations(Dt); }
     // Prevent sleeping at a residual pendulum angle while suspended.
     Spreader->WakeAllRigidBodies();
     if (bLocked) Cargo->WakeAllRigidBodies();
     const bool bDriveStopped=bEmergencyStop || (bTerminalMode && bAutoPaused);
-    const FVector TargetVelocity = bDriveStopped ? FVector::ZeroVector : FVector(DriveInput.X * TravelSpeed, DriveInput.Y * TravelSpeed * 0.6f, DriveInput.Z * HoistSpeed);
-    DriveVelocity = bDriveStopped ? FVector::ZeroVector : FMath::VInterpConstantTo(DriveVelocity, TargetVelocity, Dt, Acceleration);
-    TrolleyPosition = FMath::Clamp(TrolleyPosition + DriveVelocity.X * Dt, bTerminalMode ? -3500.f : -2200.f, bTerminalMode ? 3500.f : 2200.f);
-    GantryPosition = FMath::Clamp(GantryPosition + DriveVelocity.Y * Dt, bTerminalMode ? -3200.f : -1800.f, bTerminalMode ? 3200.f : 1800.f);
-    const float NewLength = FMath::Clamp(RopeLength - DriveVelocity.Z * Dt, Crane::MinRope, Crane::MaxRope);
+    float NewLength=RopeLength;
+    for (float Remaining=Dt;Remaining>KINDA_SMALL_NUMBER;)
+    {
+        const float Step=FMath::Min(Remaining,1.f/60.f); Remaining-=Step;
+        if (bAutoDriveTarget && !bDriveStopped) DriveSpreaderTo(AutoDriveTarget);
+        const FVector TargetVelocity=bDriveStopped?FVector::ZeroVector:FVector(DriveInput.X*TravelSpeed,DriveInput.Y*TravelSpeed*.6f,DriveInput.Z*HoistSpeed);
+        DriveVelocity=bDriveStopped?FVector::ZeroVector:FMath::VInterpConstantTo(DriveVelocity,TargetVelocity,Step,Acceleration);
+        TrolleyPosition=FMath::Clamp(TrolleyPosition+DriveVelocity.X*Step,bTerminalMode?-3500.f:-2200.f,bTerminalMode?3500.f:2200.f);
+        GantryPosition=FMath::Clamp(GantryPosition+DriveVelocity.Y*Step,bTerminalMode?-3200.f:-1800.f,bTerminalMode?3200.f:1800.f);
+        RopeLength=FMath::Clamp(RopeLength-DriveVelocity.Z*Step,Crane::MinRope,Crane::MaxRope);
+    }
+    NewLength=RopeLength;
     GantryRoot->SetRelativeLocation(FVector(0.f, GantryPosition, 0.f));
     TrolleyMesh->SetRelativeLocation(FVector(TrolleyPosition, 0.f, Crane::BeamHeight));
-    if (!FMath::IsNearlyEqual(NewLength, RopeLength))
+    if (bAutoDriveTarget || !DriveVelocity.IsNearlyZero())
     {
         RopeLength = NewLength;
         Suspension->ConstraintInstance.SetLinearLimitSize(RopeLength);

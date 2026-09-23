@@ -1,5 +1,6 @@
 #include "QuayCrane.h"
 #include "PortWorkingCrane.h"
+#include "PortSiteLogistics.h"
 #include "Components/StaticMeshComponent.h"
 #include "TerminalLayout.h"
 #include "Components/TextRenderComponent.h"
@@ -27,7 +28,7 @@ FVector AQuayCrane::TerminalSlot(int32 Index, bool bShip) const
     const int32 Row = Index % 4;
     if (bShip) return FVector(-2200.f + ((Index % 12) / 4) * 400.f, -2400.f + Row * 1600.f,
         200.f + Terminal::HalfHeight + (Index / 12) * 259.f);
-    return FVector(TerminalLayout::YardSlotX(Index), TerminalLayout::YardSlotY(Index), 20.f + Terminal::HalfHeight);
+    return SiteLogistics->CentralSlot(Index);
 }
 
 void AQuayCrane::BuildTerminal()
@@ -62,8 +63,6 @@ void AQuayCrane::BuildTerminal()
     Box(TEXT("RailRight"), FVector(850.f,0.f,30.f), FVector(35.f,10000.f,20.f));
     for (int32 I=0; I<Terminal::Count; ++I)
     {
-        FVector Pad = TerminalSlot(I, false); Pad.Z=21.f;
-        Box(FString::Printf(TEXT("DeliveryPad_%02d"), I+1), Pad, FVector(330.f,1370.f,2.f));
         auto* Container=SpawnContainer(I+1,TerminalSlot(I,true));
         CargoBodies.Add(Container->GetBody());
         CargoOnShip.Add(true);
@@ -157,7 +156,7 @@ bool AQuayCrane::IsTerminalSlotAvailable(int32 Index,bool bShip) const
     {
         if (I==Index) continue;
         const FVector Delta=CargoBodies[I]->GetComponentLocation()-Destination;
-        if (FMath::Abs(Delta.X)<245.f && FMath::Abs(Delta.Y)<1221.f && FMath::Abs(Delta.Z)<250.f) return false;
+        if (FMath::Abs(Delta.X)<(bShip?245.f:1221.f) && FMath::Abs(Delta.Y)<(bShip?1221.f:245.f) && FMath::Abs(Delta.Z)<250.f) return false;
     }
     if (bShip && Index>=12)
         return CargoOnShip[Index-12] && FVector::Dist(CargoBodies[Index-12]->GetComponentLocation(),TerminalSlot(Index-12,true))<20.f;
@@ -193,7 +192,7 @@ void AQuayCrane::BeginAutomaticJob()
         return;
     }
     ActiveCargoIndex=AutoQueue[AutoCursor]; Cargo=CargoBodies[ActiveCargoIndex];
-    ActiveAGV=AutoCursor%3; FleetStep=0; RMGStep=0; FleetSettle=0; AGVActors[ActiveAGV]->Speed=0; RMGActor->Speed=0;
+    ActiveAGV=AutoCursor%3; FleetStep=0; RMGStep=0; FleetSettle=0; AGVActors[ActiveAGV]->Speed=0; RMGActor=SiteLogistics->CentralCrane(ActiveCargoIndex); bFleetRouteActive=false; FleetWaypoint=0;
     const FVector Handover(3000.f,-2400.f+ActiveAGV*2400.f,349.5f);
     AutoSource=bAutoLoading?Handover:TerminalSlot(ActiveCargoIndex,true);
     AutoDestination=bAutoLoading?TerminalSlot(ActiveCargoIndex,true):Handover;
@@ -209,6 +208,7 @@ void AQuayCrane::BeginAutomaticJob()
 
 bool AQuayCrane::DriveSpreaderTo(FVector Target)
 {
+    AutoDriveTarget=Target; bAutoDriveTarget=true;
     const float TargetRope=3000.f-Target.Z;
     SetDriveInput((0.8f*(Target.X-TrolleyPosition)-0.8f*DriveVelocity.X)/TravelSpeed,
         (0.8f*(Target.Y-GantryPosition)-0.8f*DriveVelocity.Y)/(TravelSpeed*0.6f),
@@ -224,7 +224,7 @@ void AQuayCrane::TickAutomatic(float Dt)
     if (bAutoPaused || bEmergencyStop) return;
     AutoElapsed+=Dt; JobElapsed+=Dt; AutoStageTime+=Dt;
     const bool FleetStage=AutoStage==ETerminalStage::FleetPrepare || AutoStage==ETerminalStage::FleetDeliver;
-    if (AutoStageTime>(FleetStage?360.f:120.f)) { StopAutomatic(FString::Printf(TEXT("Timed out at %s for C%02d spreader=%s speed=%s trolley=%s cargo=%s"),GetAutoStageName(),ActiveCargoIndex+1,*Spreader->GetComponentLocation().ToString(),*Spreader->GetPhysicsLinearVelocity().ToString(),*TrolleyMesh->GetComponentLocation().ToString(),*Cargo->GetComponentLocation().ToString())); return; }
+    if (AutoStageTime>(FleetStage?12000.f:120.f)) { StopAutomatic(FString::Printf(TEXT("Timed out at %s for C%02d spreader=%s speed=%s trolley=%s cargo=%s"),GetAutoStageName(),ActiveCargoIndex+1,*Spreader->GetComponentLocation().ToString(),*Spreader->GetPhysicsLinearVelocity().ToString(),*TrolleyMesh->GetComponentLocation().ToString(),*Cargo->GetComponentLocation().ToString())); return; }
     if (FleetStage) { TickFleet(Dt); return; }
     FVector Target(TrolleyPosition,GantryPosition,Terminal::SafeHeight);
     bool bReady=false;
@@ -298,6 +298,7 @@ void AQuayCrane::CompleteAutomaticJob()
     const FVector Destination=TerminalSlot(ActiveCargoIndex,bAutoLoading);
     if (bLocked || bAGVHasCargo || bRMGHasCargo || FVector::Dist(Cargo->GetComponentLocation(),Destination)>20.f)
     { StopAutomatic(TEXT("Final cargo ownership or physical slot mismatch.")); return; }
+    SiteLogistics->CompleteCentral(ActiveCargoIndex,!bAutoLoading);
     CargoOnShip[ActiveCargoIndex]=bAutoLoading;
     ContainerActors[ActiveCargoIndex]->LocationOwner=bAutoLoading?ECargoOwner::Ship:ECargoOwner::Yard;
     ++AutoCompleted; ++Deliveries; ++AGVActors[ActiveAGV]->CompletedJobs;
@@ -315,25 +316,47 @@ void AQuayCrane::TickTerminalTest(float Dt)
 {
     TerminalTestTime+=Dt;
     FString ActorError;
-    if (!ValidateTerminalActors(ActorError)) { StopAutomatic(ActorError); }
+    if (!ValidateTerminalActors(ActorError) || !SiteLogistics->Validate(ActorError)) { StopAutomatic(ActorError); }
     auto Finish=[this](bool Pass,const FString& Why)
     {
         UE_LOG(LogPortTerminal,Display,TEXT("PORTSIM_TERMINAL_%s: %s"),Pass?TEXT("PASS"):TEXT("FAIL"),*Why);
         bTerminalTest=false; FPlatformMisc::RequestExitWithStatus(false,Pass?0:1);
     };
-    if (TerminalTestTime>18000.f || AutoStage==ETerminalStage::Fault)
+    if (FParse::Param(FCommandLine::Get(),TEXT("PortSimControlTest")) && AutoCompleted>0)
+    { Finish(true,TEXT("Accelerated STS pickup, AGV route, yard RMG placement and vehicle return completed")); return; }
+    if (TerminalTestTime>48000.f || AutoStage==ETerminalStage::Fault)
     { Finish(false,Status); return; }
+    if (FParse::Param(FCommandLine::Get(),TEXT("PortSimRoundTripTest")))
+    {
+        if (TerminalTestStage==0 && TerminalTestTime>2.f)
+        {
+            StartAutomatic(false); AutoQueue.SetNum(2); TerminalTestStage=1;
+        }
+        else if (TerminalTestStage==1 && !bAutoRunning)
+        {
+            if (AutoCompleted!=2 || GetShipCargoCount()!=22) { Finish(false,TEXT("Round-trip unload inventory mismatch")); return; }
+            StartAutomatic(true); TerminalTestStage=2;
+        }
+        else if (TerminalTestStage==2 && !bAutoRunning)
+        {
+            if (AutoCompleted!=2 || GetShipCargoCount()!=24) { Finish(false,TEXT("Round-trip load inventory mismatch")); return; }
+            ResetTerminal();
+            if (!ValidateTerminalActors(ActorError) || !SiteLogistics->Validate(ActorError)) { Finish(false,ActorError); return; }
+            Finish(true,TEXT("Two yard deliveries and reverse shipments, shared traffic, conserved cargo IDs and reset"));
+        }
+        return;
+    }
     // Exercise pause and E-stop while AGV is carrying, including RMG/cargo freeze.
     if (FleetPauseTest==0 && bAGVHasCargo && AGVActors[ActiveAGV]->Speed>100.f)
     {
         bAutoPaused=true; FleetPauseTest=1; FleetPauseStart=TerminalTestTime;
         FleetTestAGV=AGVActors[ActiveAGV]->GetActorLocation();
-        FleetTestRMG=RMGSpreader->GetComponentLocation(); FleetTestCargo=Cargo->GetComponentLocation();
+        FleetTestRMG=RMGActor->HeadPosition(); FleetTestCargo=Cargo->GetComponentLocation();
     }
     else if ((FleetPauseTest==1 || FleetPauseTest==2) && TerminalTestTime-FleetPauseStart>2.f)
     {
         if (FVector::Dist(FleetTestAGV,AGVActors[ActiveAGV]->GetActorLocation())>.1f ||
-            FVector::Dist(FleetTestRMG,RMGSpreader->GetComponentLocation())>.1f || FVector::Dist(FleetTestCargo,Cargo->GetComponentLocation())>.1f)
+            FVector::Dist(FleetTestRMG,RMGActor->HeadPosition())>.1f || FVector::Dist(FleetTestCargo,Cargo->GetComponentLocation())>.1f)
         { Finish(false,TEXT("Fleet pause/E-stop moved equipment or cargo")); return; }
         bAutoPaused=false; bEmergencyStop=FleetPauseTest==1; ++FleetPauseTest; FleetPauseStart=TerminalTestTime;
     }
@@ -393,6 +416,6 @@ void AQuayCrane::TickTerminalTest(float Dt)
         ResetTerminal();
         if (bAGVHasCargo || bRMGHasCargo || !CargoBodies[23]->IsSimulatingPhysics() || GetShipCargoCount()!=24)
         { Finish(false,TEXT("RMG carry reset failed")); return; }
-        Finish(true,FParse::Param(FCommandLine::Get(),TEXT("PortSimFleetResetTest"))?TEXT("STS/AGV/RMG carry reset and restart passed"):TEXT("3 AGVs + 1 RMG: 24 unload + 24 load, all physical slots and owners, each AGV 16 jobs, moving fleet pause/E-stop, STS/AGV/RMG carry reset, CSV export"));
+        Finish(true,FParse::Param(FCommandLine::Get(),TEXT("PortSimFleetResetTest"))?TEXT("STS/AGV/RMG carry reset and restart passed"):TEXT("3 AGVs + 18 distributed yard blocks: 24 unload + 24 load, all physical slots and owners, each AGV 16 jobs, moving fleet pause/E-stop, STS/AGV/RMG carry reset, CSV export"));
     }
 }

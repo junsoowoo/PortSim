@@ -12,7 +12,7 @@ struct FSiteYardSlot
 {
     FVector Position=FVector::ZeroVector;
     int32 Block=0, Half=0, Color=0, Instance=INDEX_NONE;
-    bool Reserved=false, Occupied=true;
+    bool Reserved=false, Occupied=true, Central=false;
     TWeakObjectPtr<UHierarchicalInstancedStaticMeshComponent> Mesh;
 };
 struct FSiteShipCargo
@@ -40,6 +40,15 @@ public:
     void AddShipCargo(FVector Position,int32 STS);
     void Initialize(const TArray<TObjectPtr<APortWorkingCrane>>& Cranes,TArray<FSiteYardSlot> Slots,
         const TArray<UHierarchicalInstancedStaticMeshComponent*>& Palette,int32 CentralCargo,int32 FixedYard);
+    FVector CentralSlot(int32 Index) const;
+    FVector CentralHandover(int32 Index) const;
+    APortWorkingCrane* CentralCrane(int32 Index) const;
+    bool ReserveCentral(int32 Index);
+    void CompleteCentral(int32 Index,bool Occupied);
+    bool OwnsCentral(int32 Index) const { return CentralReservation==Index; }
+    void RegisterBerthVehicles(const TArray<TObjectPtr<APortAGVActor>>& BerthVehicles);
+    void BeginTrafficFrame();
+    bool MoveVehicle(APortAGVActor* Vehicle,FVector Target,float Dt);
     void Advance(float Dt,bool Paused);
     void ResetLogistics();
     bool Validate(FString& Error) const;
@@ -56,18 +65,29 @@ public:
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly) int32 DispatchLimit=MAX_int32;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly) FString Fault;
     UPROPERTY() TArray<TObjectPtr<APortAGVActor>> Vehicles;
+    UPROPERTY() TArray<TObjectPtr<APortAGVActor>> TrafficVehicles;
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly) int32 PeakMovingVehicles=0;
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly) int32 PrefetchedJobs=0;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly) TArray<TObjectPtr<APortContainerActor>> ShipContainers;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly) TArray<TObjectPtr<APortContainerActor>> PlacedContainers;
     UPROPERTY() TArray<TObjectPtr<APortWorkingCrane>> Equipment;
 private:
     TArray<FSiteShipCargo> Manifest;
     TArray<FSiteYardSlot> Yard;
+    TArray<int32> CentralSlots;
+    int32 CentralReservation=INDEX_NONE, CentralPending=INDEX_NONE;
     TArray<FSiteTransfer> Jobs;
     TArray<bool> BlocksBusy;
+    TArray<bool> RMGBusy;
+    TArray<int32> PreparedCargo;
+    TMap<int32,FBox> RoadReservations;
+    TSet<int32> FinishedRoadSegments;
     TArray<bool> SlotAssigned;
-    int32 CorridorOwner=INDEX_NONE, NextRMG=0, CentralCount=0, Dispatched=0;
+    int32 CentralCount=0, Dispatched=0;
     bool bReady=false, bWasPaused=false;
     void Dispatch(int32 Lane);
+    void PrepareNextCargo(int32 Lane);
+    bool ReserveYard(int32 Lane);
     void PrepareRoute(int32 Lane,bool Return);
     bool Drive(int32 Lane,float Dt);
     void Freeze(bool Paused);

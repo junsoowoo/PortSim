@@ -68,7 +68,7 @@ void AQuayCrane::BuildTerminalSite()
     // Perimeter and cross-yard roads, with open access at the inland gate.
     for (float X:{145.f,650.f,775.f})
     {
-        Box(Roads,FVector(X,0,.24),FVector(18,1020,.06));
+        Box(Roads,FVector(X,0,.24),FVector(X==145.f?60.f:18.f,1020,.06));
         for (int32 I=0;I<85;++I) Box(White,FVector(X,-500+I*12,.28),FVector(.15,5,.02));
     }
     for (float Y:{-505.f,325.f,505.f})
@@ -103,6 +103,13 @@ void AQuayCrane::BuildTerminalSite()
             auto* Crane=GetWorld()->SpawnActor<APortWorkingCrane>(FVector(X*100,Y*100,0),FRotator(0,90,0),Params);
             WorkingCranes.Add(Crane);
             Crane->Configure(WorkingCranes.Num(),false,FVector((X-13)*100,(Y-3)*100,149.5f),FVector((X+13)*100,(Y+3)*100,149.5f),false);
+        }
+        for (int32 Half=0;Half<2;++Half)
+        {
+            const float HX=Half?420.f:180.f;
+            Box(Roads,FVector(HX,Y+13.2f,.25),FVector(15,3.6,.06));
+            for (float Side:{-1.f,1.f})
+                Box(White,FVector(HX,Y+13.2f+Side*1.8f,.30),FVector(15,.12,.02));
         }
         Label(FString::Printf(TEXT("%s %02d"),Block<3?TEXT("REEFER"):TEXT("CY"),Block+1),FVector(177,Y,.4),2.5f);
     }
@@ -162,6 +169,7 @@ void AQuayCrane::BuildTerminalSite()
     }
     Label(TEXT("4 GATE"),FVector(760,420,9),4.f);
     Label(TEXT("DGT | BUSAN NEW PORT 7 | 1,050 m"),FVector(72,-200,.4),5.f);
-    Label(TEXT("TRAINING BERTH"),FVector(105,0,.4),3.f);
+    Label(TEXT("STS BERTH - TO YARD BLOCKS"),FVector(105,0,.4),3.f);
     SiteLogistics->Initialize(WorkingCranes,MoveTemp(YardSlots),{Blue,Yellow,Red,Green},24,FixedYard);
+    SiteLogistics->RegisterBerthVehicles(AGVActors);
 }

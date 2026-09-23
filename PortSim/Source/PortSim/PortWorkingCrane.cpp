@@ -98,7 +98,7 @@ void APortWorkingCrane::ResetOperation()
     if (bExternalJobs)
     {
         if (IsValid(CargoActor)) CargoActor->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
-        CargoActor=nullptr; bJobActive=bCarrying=bPaused=bResumePhysics=false;
+        CargoActor=nullptr; bJobActive=bCarrying=bPaused=bResumePhysics=false; bDestinationReady=true;
         SourceSlot=Stage=CompletedJobs=0; Fault.Empty(); Speed=StageTime=SettleTime=0;
         Head=Local(Slots[0]); Head.Z=SafeZ; JobStartHead=Head; UpdateParts();
         for (const auto& Pad:Pads) { Pad->SetCollisionEnabled(ECollisionEnabled::NoCollision); Pad->SetVisibility(false); }
@@ -186,6 +186,9 @@ void APortWorkingCrane::Advance(float Dt,bool bGlobalPaused)
     if (!bConfigured) return;
     SetOperationPaused(bGlobalPaused || !bEnabled || !Fault.IsEmpty());
     if (bPaused || !bJobActive) return;
+    // Pick and lift the next ship box while the vehicle is away; hold it safely
+    // above the dock until the returning AGV is stopped beneath the spreader.
+    if (Stage==5 && !bDestinationReady) return;
     StageTime+=Dt;
     if (StageTime>180.f) { Stop(TEXT("Job stage timed out")); return; }
     const FVector Source=Local(Slots[SourceSlot]);
@@ -216,8 +219,13 @@ void APortWorkingCrane::Advance(float Dt,bool bGlobalPaused)
     {
         if (FVector::Dist(CargoActor->GetActorLocation(),Slots[SourceSlot])>10.f ||
             CargoActor->GetActorUpVector().Z<.99f || CargoActor->GetBody()->GetPhysicsLinearVelocity().Size()>5.f)
-        { Stop(TEXT("Pickup alignment/stop interlock")); return; }
-        if (!DestinationClear()) { Stop(TEXT("Destination slot occupied")); return; }
+        {
+            if (StageTime>30.f) Stop(FString::Printf(TEXT("Pickup alignment: error %.2f cm, speed %.2f, up %.3f"),
+                FVector::Dist(CargoActor->GetActorLocation(),Slots[SourceSlot]),CargoActor->GetBody()->GetPhysicsLinearVelocity().Size(),CargoActor->GetActorUpVector().Z));
+            return;
+        }
+        if (bDestinationReady && !DestinationClear()) { Stop(TEXT("Destination slot occupied")); return; }
+        CargoActor->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
         auto* Body=CargoActor->GetBody();
         Body->SetSimulatePhysics(false);
         CargoActor->SetActorLocationAndRotation(HeadPosition()-FVector(0,0,WorkingCrane::LiftOffset),Orientation.Rotator());
@@ -251,7 +259,8 @@ bool APortWorkingCrane::ValidateOperation(FString& Error) const
     if (bCarrying && (CargoActor->GetAttachParentActor()!=this || CargoActor->GetBody()->IsSimulatingPhysics() ||
         !CargoActor->GetActorLocation().Equals(HeadPosition()-FVector(0,0,WorkingCrane::LiftOffset),1.f)))
     { Error=TEXT("Locked cargo is detached or out of alignment"); return false; }
-    if (!bCarrying && CargoActor->GetAttachParentActor())
+    if (!bCarrying && CargoActor->GetAttachParentActor() &&
+        !(Stage<=2 && CargoActor->LocationOwner==ECargoOwner::AGV && !CargoActor->GetBody()->IsSimulatingPhysics()))
     { Error=TEXT("Released cargo remains attached"); return false; }
     return true;
 }
@@ -267,6 +276,7 @@ bool APortWorkingCrane::AssignCargo(APortContainerActor* Cargo,FVector Source,FV
 {
     if (!bExternalJobs || bJobActive || !IsValid(Cargo) || !Fault.IsEmpty()) return false;
     CargoActor=Cargo; Slots[0]=Source; Slots[1]=Destination; SourceSlot=Stage=0;
+    bDestinationReady=true;
     bJobActive=true; bCarrying=false; Speed=StageTime=SettleTime=0; JobStartHead=Head;
     for (int32 I=0;I<2;++I)
     {

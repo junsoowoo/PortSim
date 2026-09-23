@@ -27,7 +27,8 @@ bool AQuayCrane::ValidateTerminalActors(FString& Error) const
     for (int32 I=0;I<ContainerActors.Num();++I)
     {
         const auto* Container=ContainerActors[I].Get();
-        if (!IsValid(Container) || Container->GetOwner()!=this || Container->GetAttachParentActor() ||
+        if (!IsValid(Container) || Container->GetOwner()!=this ||
+            (Container->GetAttachParentActor() && !(Container->LocationOwner==ECargoOwner::RMG && Container->GetAttachParentActor()==RMGActor)) ||
             Container->GetBody()->GetOwner()!=Container || Container->GetRootComponent()!=Container->GetBody() ||
             Container->Visual->GetOwner()!=Container || Container->ContainerID.IsNone() ||
             IDs.Contains(Container->ContainerID) || Actors.Contains(Container) ||
@@ -43,10 +44,12 @@ bool AQuayCrane::ValidateTerminalActors(FString& Error) const
         if (It->GetOwner()==this) ++SpawnedContainers;
     if (SpawnedContainers!=Expected) { Error=TEXT("Duplicate spawned container actor"); return false; }
     if (!bTerminalMode) return true;
-    if (AGVActors.Num()!=3 || !IsValid(RMGActor) || !IsValid(ShipActor) ||
-        RMGSpreader->GetOwner()!=RMGActor || RMGActor->GetOwner()!=this || ShipActor->GetOwner()!=this)
+    for (TActorIterator<APortRMGActor> It(GetWorld());It;++It)
+        if (It->GetOwner()==this) { Error=TEXT("Obsolete central RMG still exists"); return false; }
+    if (AGVActors.Num()!=3 || WorkingCranes.Num()!=44 || !IsValid(SiteLogistics) || !IsValid(ShipActor) || ShipActor->GetOwner()!=this)
     { Error=TEXT("Fleet/ship actor ownership mismatch"); return false; }
-    TArray<const AActor*> Equipment={RMGActor.Get(),ShipActor.Get()};
+    TArray<const AActor*> Equipment={ShipActor.Get()};
+    for (const auto& Crane:WorkingCranes) Equipment.Add(Crane);
     for (int32 I=0;I<AGVActors.Num();++I)
     {
         if (!IsValid(AGVActors[I]) || AGVActors[I]->VehicleID!=I+1)
@@ -76,7 +79,7 @@ void AQuayCrane::DestroyTerminalActors()
     Destroy(SiteLogistics); SiteLogistics=nullptr;
     for (const auto& Crane:WorkingCranes) Destroy(Crane);
     WorkingCranes.Reset();
-    Destroy(RMGActor); Destroy(ShipActor); Destroy(SiteActor); SiteActor=nullptr;
+    Destroy(ShipActor); Destroy(SiteActor); SiteActor=nullptr;
     ContainerActors.Reset(); CargoBodies.Reset(); AGVActors.Reset();
-    RMGActor=nullptr; RMGSpreader=nullptr; ShipActor=nullptr; Cargo=nullptr;
+    RMGActor=nullptr; ShipActor=nullptr; Cargo=nullptr;
 }
