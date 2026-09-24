@@ -48,10 +48,10 @@ void APortWorkingCrane::Configure(int32 Number,bool bQuayside,FVector Source,FVe
     }
     for (int32 I=0;I<2;++I)
     {
-        Beams[I]->SetRelativeLocation(FVector(bSTS?-1500.f:0.f,(I?-1:1)*(bSTS?730.f:650.f),bSTS?3100.f:2600.f));
+        Beams[I]->SetRelativeLocation(FVector(bSTS?-2500.f:0.f,(I?-1:1)*(bSTS?730.f:650.f),bSTS?3100.f:2600.f));
         CrossBeams[I]->SetRelativeLocation(FVector((I?-1:1)*HalfGauge,0,bSTS?2900.f:2580.f));
         CrossBeams[I]->SetRelativeScale3D(bSTS?FVector(1.4,22,1.4):FVector(1.6,18,1.6));
-        Beams[I]->SetRelativeScale3D(FVector(bSTS?125.f:34.f,bSTS?1.f:1.2f,1.8f));
+        Beams[I]->SetRelativeScale3D(FVector(bSTS?150.f:34.f,bSTS?1.f:1.2f,1.8f));
         Pads[I]->SetWorldLocationAndRotation(Slots[I]-FVector(0,0,139.5f),Orientation);
         Pads[I]->SetWorldScale3D(FVector(3.1f,13.f,.2f));
     }
@@ -61,7 +61,7 @@ void APortWorkingCrane::Configure(int32 Number,bool bQuayside,FVector Source,FVe
     Trolley->SetRelativeScale3D(bSTS?FVector(3.6,14.5,1):FVector(4.2,14.5,1.2));
     NameLabel->SetRelativeLocation(FVector(0,0,BeamZ+150));
     NameLabel->SetWorldSize(170);
-    NameLabel->SetText(FText::FromString(FString::Printf(TEXT("%s %02d"),bSTS?TEXT("STS"):TEXT("RMG"),CraneID)));
+    NameLabel->SetText(FText::FromString(FString::Printf(TEXT("%s %02d"),bSTS?TEXT("CC 24-row / STS"):TEXT("TC / RMG"),CraneID)));
     auto Material=[](const TCHAR* Name) { return LoadObject<UMaterialInterface>(nullptr,*FString::Printf(TEXT("/Game/PortSim/Assets/Materials/M_%s.M_%s"),Name,Name)); };
     for (const auto& Part:Legs) Part->SetMaterial(0,Material(bSTS?TEXT("CraneYellow"):TEXT("Target")));
     for (const auto& Part:Beams) Part->SetMaterial(0,Material(bSTS?TEXT("CraneYellow"):TEXT("Target")));

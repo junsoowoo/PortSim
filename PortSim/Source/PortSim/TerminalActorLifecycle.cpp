@@ -22,7 +22,7 @@ bool AQuayCrane::ValidateTerminalActors(FString& Error) const
 {
     if (bUnifiedTerminal)
     {
-        if (!IsValid(SiteLogistics) || WorkingCranes.Num()!=45 || ContainerActors.Num()!=0 || AGVActors.Num()!=0 || ShipActor)
+        if (!IsValid(SiteLogistics) || WorkingCranes.Num()!=55 || SupportFleet.Num()!=105 || ContainerActors.Num()!=0 || AGVActors.Num()!=0 || ShipActor)
         { Error=TEXT("Legacy central berth still exists or unified equipment count is wrong"); return false; }
         return SiteLogistics->Validate(Error);
     }
@@ -82,6 +82,8 @@ void AQuayCrane::DestroyTerminalActors()
     auto Destroy=[](AActor* Actor) { if (IsValid(Actor) && !Actor->IsActorBeingDestroyed()) Actor->Destroy(); };
     for (const auto& Container:ContainerActors) Destroy(Container);
     for (const auto& Vehicle:AGVActors) Destroy(Vehicle);
+    for (const auto& Vehicle:SupportFleet) Destroy(Vehicle);
+    SupportFleet.Reset();
     Destroy(SiteLogistics); SiteLogistics=nullptr;
     for (const auto& Crane:WorkingCranes) Destroy(Crane);
     WorkingCranes.Reset();

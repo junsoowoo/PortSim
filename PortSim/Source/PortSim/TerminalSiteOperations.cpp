@@ -15,14 +15,17 @@ void AQuayCrane::TickSiteOperations(float Dt)
     if (RMGActor) RMGActor->SetOperationPaused(bAutoPaused || bEmergencyStop || AutoStage==ETerminalStage::Fault);
     if (!SiteLogistics || (bTerminalTest && !FParse::Param(FCommandLine::Get(),TEXT("PortSimMixedTest")))) return;
     if (bTerminalTest) SiteLogistics->DispatchLimit=16;
-    const bool Testing=FParse::Param(FCommandLine::Get(),TEXT("PortSimSiteTest"));
-    if (Testing) SiteLogistics->DispatchLimit=SiteLogistics->Vehicles.Num()*2;
+    const bool Full=FParse::Param(FCommandLine::Get(),TEXT("PortSimFullUnloadTest"));
+    const bool Testing=Full || FParse::Param(FCommandLine::Get(),TEXT("PortSimSiteTest"));
+    if (Testing) SiteLogistics->DispatchLimit=Full?SiteLogistics->InitialShipCount():SiteLogistics->Vehicles.Num()*2;
     SiteLogistics->Advance(Dt,bAutoPaused || bEmergencyStop);
     if (Testing) TickSiteTest(Dt);
 }
 void AQuayCrane::TickSiteTest(float Dt)
 {
     SiteTestTime+=Dt;
+    const bool Full=FParse::Param(FCommandLine::Get(),TEXT("PortSimFullUnloadTest"));
+    const int32 Expected=Full?SiteLogistics->InitialShipCount():SiteLogistics->Vehicles.Num()*2;
     auto Finish=[](bool Pass,const FString& Why)
     {
         UE_LOG(LogTemp,Display,TEXT("PORTSIM_SITE_%s: %s"),Pass?TEXT("PASS"):TEXT("FAIL"),*Why);
@@ -30,7 +33,7 @@ void AQuayCrane::TickSiteTest(float Dt)
     };
     FString Error;
     if (!SiteLogistics->Validate(Error)) { Finish(false,Error); return; }
-    if (SiteTestTime>14000.f) { Finish(false,TEXT("Integrated logistics timeout")); return; }
+    if (SiteTestTime>(Full?200000.f:14000.f)) { Finish(false,TEXT("Integrated logistics timeout")); return; }
     bool Moving=false;
     for (const auto& Vehicle:SiteLogistics->Vehicles) Moving|=Vehicle->Speed>1.f;
     auto Freeze=[&](bool Emergency)
@@ -56,12 +59,17 @@ void AQuayCrane::TickSiteTest(float Dt)
         { Finish(false,TEXT("In-transit reset: ")+Error); return; }
         SiteTestStage=5;
     }
-    else if (SiteTestStage==5 && SiteLogistics->Delivered==SiteLogistics->Vehicles.Num()*2 && SiteLogistics->IsIdle())
+    else if (SiteTestStage==5 && SiteLogistics->Delivered==Expected && SiteLogistics->IsIdle())
     {
         for (const auto& Vehicle:SiteLogistics->Vehicles)
             if (Vehicle->CompletedJobs<1) { Finish(false,TEXT("Not every AGV performed a handover")); return; }
         if (SiteLogistics->PeakMovingVehicles<2 || SiteLogistics->PrefetchedJobs<(bUnifiedTerminal?9:6))
         { Finish(false,TEXT("AGVs did not move concurrently or STSs did not prepare ahead")); return; }
+        if (bUnifiedTerminal && SiteLogistics->QueuedHandoffs<9)
+        { Finish(false,TEXT("Next AGVs were not preassigned to the STS queues")); return; }
+        if (Full && (SiteLogistics->ShipRemaining()!=0 || SiteLogistics->InTransit()!=0 || SiteLogistics->PlacedContainers.Num()!=Expected))
+        { Finish(false,TEXT("Full vessel inventory was not physically stored")); return; }
+        UE_LOG(LogTemp,Display,TEXT("RECEIVING_METRICS: capacity=%d delivered=%d queued_handoffs=%d elapsed_simulation=%.1f"),SiteLogistics->ReceivingCapacity,SiteLogistics->Delivered,SiteLogistics->QueuedHandoffs,SiteTestTime);
         UE_LOG(LogTemp,Display,TEXT("DISPATCH_METRICS: peak_moving_agvs=%d prefetched_jobs=%d"),SiteLogistics->PeakMovingVehicles,SiteLogistics->PrefetchedJobs);
         const FString Summary=FString::Printf(TEXT("yard %d -> %d; %d vessel containers; %d AGVs, %d complete STS/AGV/RMG shipments; equal vessel inventories, concurrent traffic, STS prefetch, physical placement, pause/E-stop and reset"),
             SiteLogistics->BaselineYard,SiteLogistics->InitialYard,SiteLogistics->InitialShipCount(),SiteLogistics->Vehicles.Num(),SiteLogistics->Delivered);
@@ -74,6 +82,8 @@ void AQuayCrane::TickSiteTest(float Dt)
 void AQuayCrane::FocusNextSiteCrane()
 {
     if (WorkingCranes.IsEmpty()) return;
+    bFreeCamera=false;
+    bFollowAGV=false;
     SiteCameraIndex=(SiteCameraIndex+1)%WorkingCranes.Num();
     const auto* Crane=WorkingCranes[SiteCameraIndex].Get();
     CameraArm->SetRelativeLocation(Crane->GetActorLocation()+FVector(0,0,Crane->bSTS?2300:800));
