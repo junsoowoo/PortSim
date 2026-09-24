@@ -23,6 +23,7 @@ void AQuayCrane::TickSiteOperations(float Dt)
 }
 void AQuayCrane::TickSiteTest(float Dt)
 {
+    if (SiteTestTime==0) UE_LOG(LogTemp,Display,TEXT("SITE_TEST_STEP: %.6f simulation seconds per frame"),Dt);
     SiteTestTime+=Dt;
     const bool Full=FParse::Param(FCommandLine::Get(),TEXT("PortSimFullUnloadTest"));
     const int32 Expected=Full?SiteLogistics->InitialShipCount():SiteLogistics->Vehicles.Num()*2;

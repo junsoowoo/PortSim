@@ -156,7 +156,7 @@ void APortSiteLogistics::ActivateVehicle(int32 Vehicle,int32 STS,bool FromQueue)
     const FVector Quay=QuayPark(STS);
     if (FromQueue)
     {
-        Job.Route={FVector(4500,Quay.Y+2000,0),Quay};
+        Job.Route={Quay};
         NextVehicles[STS]=INDEX_NONE; ++QueuedHandoffs;
     }
     else if (!Vehicles[Vehicle]->GetActorLocation().Equals(Quay,1.f))
@@ -171,7 +171,7 @@ void APortSiteLogistics::ScheduleFleet()
         int32 Best=INDEX_NONE; double Score=TNumericLimits<double>::Max();
         for (int32 I=0;I<Vehicles.Num();++I) if (Jobs[I].Stage==0)
         {
-            const double Cost=Vehicles[I]->CompletedJobs*1000000.0+FVector::Dist2D(Vehicles[I]->GetActorLocation(),Target);
+            const double Cost=Vehicles[I]->CompletedJobs*1000.0+FVector::Dist2D(Vehicles[I]->GetActorLocation(),Target);
             if (Cost<Score) { Best=I; Score=Cost; }
         }
         return Best;
@@ -191,7 +191,7 @@ void APortSiteLogistics::ScheduleFleet()
     {
         PrepareNextCargo(S);
         if (STSOwners[S]==INDEX_NONE || NextVehicles[S]!=INDEX_NONE || PreparedCargo[S]==INDEX_NONE) continue;
-        const FVector Buffer(5500,QuayPark(S).Y+2000,0);
+        const FVector Buffer(4500,QuayPark(S).Y+2000,0);
         const int32 V=Nearest(Buffer);
         if (V==INDEX_NONE) continue;
         NextVehicles[S]=V;
@@ -259,6 +259,19 @@ void APortSiteLogistics::PrepareRoute(int32 Lane,bool Return)
         {
             // Separate inbound aisle (65 m) and outbound aisle (35 m).
             // Cross behind the south end of the fleet parking strip.
+            if (Quay.Y>0)
+            {
+                // Northern berths use their own north exit and southbound loaded lane.
+                Job.Route.Add(FVector(5500,Quay.Y,0));
+                for (float Y=Quay.Y+3000;Y<51500-1600;Y+=3000) Job.Route.Add(FVector(5500,Y,0));
+                Job.Route.Add(FVector(5500,51500,0));
+                Job.Route.Add(FVector(16500,51500,0));
+                for (float Y=48500;Y>BlockY+2050+1600;Y-=3000) Job.Route.Add(FVector(16500,Y,0));
+                Job.Route.Add(FVector(16500,BlockY+2050,0));
+                Job.Route.Add(FVector(YardPoint.X,BlockY+2050,0));
+                Job.Route.Add(YardPoint);
+                return;
+            }
             Job.Route.Add(FVector(3500,Quay.Y,0));
             for (float Y=Quay.Y-3000;Y>-51500+1600;Y-=3000) Job.Route.Add(FVector(3500,Y,0));
             Job.Route.Add(FVector(3500,-51500,0));
@@ -325,6 +338,18 @@ void APortSiteLogistics::BeginTrafficFrame()
 bool APortSiteLogistics::MoveVehicle(APortAGVActor* Vehicle,FVector Target,float Dt)
 {
     const int32 ID=Vehicle->VehicleID;
+    const int32 VehicleIndex=Vehicles.IndexOfByKey(Vehicle);
+    bool StraightThrough=false;
+    if (Jobs.IsValidIndex(VehicleIndex))
+    {
+        const auto& Job=Jobs[VehicleIndex];
+        if (Job.Route.IsValidIndex(Job.Waypoint+1))
+        {
+            const FVector A=(Target-Vehicle->GetActorLocation()).GetSafeNormal();
+            const FVector B=(Job.Route[Job.Waypoint+1]-Target).GetSafeNormal();
+            StraightThrough=FVector::DotProduct(A,B)>.999f;
+        }
+    }
     if (!RoadTargets.Contains(ID) || !RoadTargets[ID].Equals(Target,.01f))
     {
         const FVector Along=Vehicle->GetActorForwardVector().GetAbs(), Across=Vehicle->GetActorRightVector().GetAbs();
@@ -332,7 +357,6 @@ bool APortSiteLogistics::MoveVehicle(APortAGVActor* Vehicle,FVector Target,float
         FBox Segment(Vehicle->GetActorLocation()-Extent,Vehicle->GetActorLocation()+Extent);
         Segment+=Target-Extent; Segment+=Target+Extent;
         TArray<FBox> Segments={Segment};
-        const int32 VehicleIndex=Vehicles.IndexOfByKey(Vehicle);
         if (Jobs.IsValidIndex(VehicleIndex))
         {
             const auto& Job=Jobs[VehicleIndex];
@@ -352,21 +376,32 @@ bool APortSiteLogistics::MoveVehicle(APortAGVActor* Vehicle,FVector Target,float
                 if (Clearance>=1600) break;
             }
         }
+        int32 Blocker=INDEX_NONE;
         for (const auto& Reservation:RoadReservations)
             if (Reservation.Key!=ID) for (const FBox& A:Segments) for (const FBox& B:Reservation.Value)
-                if (A.Intersect(B)) { RoadBlockers.Add(ID,Reservation.Key); Vehicle->Speed=0; return false; }
+                if (A.Intersect(B)) { Blocker=Reservation.Key; break; }
         for (const auto& Other:TrafficVehicles)
         {
             if (Other==Vehicle) continue;
             const FVector E=Other->GetActorForwardVector().GetAbs()*210.f+Other->GetActorRightVector().GetAbs()*730.f+FVector(0,0,250);
             for (const FBox& A:Segments)
-                if (A.Intersect(FBox(Other->GetActorLocation()-E,Other->GetActorLocation()+E))) { RoadBlockers.Add(ID,Other->VehicleID); Vehicle->Speed=0; return false; }
+                if (A.Intersect(FBox(Other->GetActorLocation()-E,Other->GetActorLocation()+E))) { Blocker=Other->VehicleID; break; }
+        }
+        if (Blocker!=INDEX_NONE)
+        {
+            // Requests change only at a waypoint. While stopped there, retain the
+            // physical vehicle envelope, not an unentered road needed by its blocker.
+            // Never revoke the reservation of a vehicle already traversing a segment.
+            RoadBlockers.Add(ID,Blocker);
+            RoadReservations.Remove(ID); RoadTargets.Remove(ID);
+            Vehicle->Speed=0;
+            return false;
         }
         RoadReservations.Add(ID,Segments);
         RoadTargets.Add(ID,Target);
         RoadBlockers.Remove(ID);
     }
-    const bool Arrived=Vehicle->MoveToPosition(Target,Dt);
+    const bool Arrived=Vehicle->MoveToPosition(Target,Dt,!StraightThrough);
     if (Arrived) FinishedRoadSegments.Add(ID);
     return Arrived;
 }
@@ -436,6 +471,22 @@ void APortSiteLogistics::Advance(float Dt,bool Paused)
         auto& Job=Jobs[Lane]; auto* Vehicle=Vehicles[Lane].Get();
         if (Job.Stage==0) { if (LaneCount==8) Dispatch(Lane); continue; }
         Job.Time+=Dt;
+        if (Job.LastStage!=Job.Stage || !Job.LastPosition.Equals(Vehicle->GetActorLocation(),10.f)) Job.StationaryTime=0;
+        else Job.StationaryTime+=Dt;
+        Job.LastStage=Job.Stage; Job.LastPosition=Vehicle->GetActorLocation();
+        if (Job.StationaryTime>300)
+        {
+            Job.StationaryTime=0;
+            int32 Current=Vehicle->VehicleID;
+            for (int32 Depth=0;Depth<8;++Depth)
+            {
+                const int32 I=Current-100;
+                if (!Jobs.IsValidIndex(I)) break;
+                const auto& J=Jobs[I];
+                UE_LOG(LogTemp,Display,TEXT("BLOCK_CHAIN: V%d stage=%d sts=%d wp=%d/%d pos=%s target=%s blocker=%d"),Current,J.Stage,J.STS,J.Waypoint,J.Route.Num(),*Vehicles[I]->GetActorLocation().ToCompactString(),J.Route.IsValidIndex(J.Waypoint)?*J.Route[J.Waypoint].ToCompactString():TEXT("none"),RoadBlockers.FindRef(Current));
+                Current=RoadBlockers.FindRef(Current);
+            }
+        }
         if (Job.Time>12000.f) { Stop(TEXT("Shipment timeout")); return; }
         auto* Cargo=Job.Actor.Get();
         switch(Job.Stage)

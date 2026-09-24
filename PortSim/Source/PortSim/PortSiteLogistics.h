@@ -28,6 +28,9 @@ struct FSiteTransfer
 {
     int32 Cargo=INDEX_NONE, Slot=INDEX_NONE, RMG=INDEX_NONE, STS=INDEX_NONE, Stage=0, Waypoint=0;
     float Time=0;
+    float StationaryTime=0;
+    FVector LastPosition=FVector::ZeroVector;
+    int32 LastStage=-1;
     TWeakObjectPtr<APortContainerActor> Actor;
     TArray<FVector> Route;
     bool bYardReleased=false;
