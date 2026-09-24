@@ -54,6 +54,7 @@ public:
     bool MoveVehicle(APortAGVActor* Vehicle,FVector Target,float Dt);
     void Advance(float Dt,bool Paused);
     void ResetLogistics();
+    void ExportDashboard(bool Paused, bool Force=false);
     bool Validate(FString& Error) const;
     int32 ShipRemaining() const;
     int32 InTransit() const;
@@ -77,6 +78,9 @@ public:
 private:
     FSTSOperatingProfile STSProfile;
     double SimulationTime=0;
+    double NextDashboardWall=0;
+    double VesselStarted[3]={-1,-1,-1}, VesselUnloaded[3]={-1,-1,-1}, VesselPlaced[3]={-1,-1,-1};
+    void RecordVesselEvent(int32 CargoIndex, bool Placed);
     FString ReportBase, ResultsCsv;
     bool SaveReports() const;
     void BeginReport();

@@ -8,6 +8,7 @@
 class APortContainerActor;
 class UTextRenderComponent;
 class APortAGVActor;
+class FJsonObject;
 
 /** Independently reserved two-slot crane job. Gantry/trolley/hoist are driven;
  * cargo is locked to the spreader during transport and physically released. */
@@ -31,6 +32,7 @@ public:
     virtual void EndPlay(const EEndPlayReason::Type Reason) override;
     bool ValidateOperation(FString& Error) const;
     FVector HeadPosition() const;
+    TSharedRef<FJsonObject> DashboardState() const;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Operation") bool bEnabled=true;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Operation") bool bSTS=false;

@@ -101,6 +101,7 @@ void APortSiteLogistics::PrepareNextCargo(int32 Lane)
     if (!Equipment[36+Lane]->AssignCargo(Record.Actor.Get(),Record.Transform.GetLocation(),QuayPark(Lane)+FVector(0,0,349.5f),false,false,Vehicles[Lane]))
     { Stop(TEXT("STS could not prepare its next ship container: ")+Equipment[36+Lane]->Fault); return; }
     Record.StartedAt=SimulationTime; Record.PreparedPausedSeconds=0;
+    if(LaneCount==9 && VesselStarted[Lane/3]<0) VesselStarted[Lane/3]=SimulationTime;
     Equipment[36+Lane]->SetDestinationReady(false);
     PreparedCargo[Lane]=Index; Record.State=1; ++Dispatched;
     if (Jobs[Lane].Stage) ++PrefetchedJobs;
@@ -227,6 +228,7 @@ void APortSiteLogistics::Advance(float Dt,bool Paused)
 {
     if (!bReady) return;
     SimulationTime+=Dt;
+    ExportDashboard(Paused);
     if(Paused) for(int32 Index:PreparedCargo) if(Index!=INDEX_NONE) Manifest[Index].PreparedPausedSeconds+=Dt;
     for(auto& Job:Jobs) if(Job.Stage) { Job.Time+=Dt; if(Paused) Job.PausedSeconds+=Dt; }
     Freeze(Paused || !Fault.IsEmpty());
@@ -257,6 +259,7 @@ void APortSiteLogistics::Advance(float Dt,bool Paused)
             Cargo->AttachToComponent(Vehicle->GetRootComponent(),FAttachmentTransformRules::KeepWorldTransform);
             Cargo->LocationOwner=ECargoOwner::AGV;
             Manifest[Job.Cargo].HandoverMask|=1;
+            RecordVesselEvent(Job.Cargo,false);
             Job.HandoverAt=SimulationTime;
             Job.STSSeconds=Equipment[36+Lane]->LastJobSeconds;
             UE_LOG(LogTemp,Display,TEXT("SITE_HANDOVER: C%d STS -> AGV%d"),Manifest[Job.Cargo].ID,100+Lane);
@@ -284,6 +287,7 @@ void APortSiteLogistics::Advance(float Dt,bool Paused)
             PlacedContainers.Add(Cargo);
             Manifest[Job.Cargo].HandoverMask|=4;
             Manifest[Job.Cargo].State=2; ++Delivered; ++Vehicle->CompletedJobs;
+            RecordVesselEvent(Job.Cargo,true);
             ResultsCsv+=FString::Printf(TEXT("C%d,%d,%d,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.1f\n"),
                 Manifest[Job.Cargo].ID,Lane+1,100+Lane,Job.RMG+1,Job.StartedAt,Job.HandoverAt,SimulationTime,
                 Job.Time,Job.STSSeconds,Job.PausedSeconds,Cargo->MassKg);
@@ -466,6 +470,8 @@ TArray<FVector> APortSiteLogistics::Snapshot() const
 void APortSiteLogistics::BeginReport()
 {
     SimulationTime=0;
+    NextDashboardWall=0;
+    for(int32 I=0;I<3;++I) VesselStarted[I]=VesselUnloaded[I]=VesselPlaced[I]=-1;
     ReportBase=FPaths::ProjectSavedDir()/TEXT("Results")/TEXT("Site_")+FGuid::NewGuid().ToString(EGuidFormats::Digits);
     ResultsCsv=TEXT("ContainerID,STSLane,AGVID,RMGID,StartedAtSeconds,STSHandoverAtSeconds,FinalPlacementAtSeconds,ShipmentSeconds,STSSeconds,PausedSeconds,PayloadKg\n");
     if(!SaveReports()) Stop(TEXT("Could not initialize site shipment report"));
