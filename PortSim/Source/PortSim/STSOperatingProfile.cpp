@@ -44,7 +44,7 @@ bool FSTSOperatingProfile::Load(const FString& ReferenceFile, const FString& Set
     FObject Ref, Settings;
     if (!Read(ReferenceFile, Ref, Error) || !Read(SettingsFile, Settings, Error)) return false;
     FString Kind;
-    if (!Settings->TryGetStringField(TEXT("kind"), Kind) || Kind != TEXT("simulation_assumptions_not_manufacturer_data"))
+    if (!Settings->TryGetStringField(TEXT("kind"), Kind) || (Kind != TEXT("simulation_assumptions_not_manufacturer_data") && Kind != TEXT("mixed_manufacturer_sensor_specs_and_simulation_assumptions")))
     { Error = TEXT("STS settings must explicitly identify simulation assumptions"); return false; }
     const auto Geometry = Object(Ref,TEXT("geometry"));
     const auto Drives = Object(Ref,TEXT("drives"));
@@ -143,9 +143,11 @@ bool FSTSOperatingProfile::Load(const FString& ReferenceFile, const FString& Set
     for(const TCHAR* Required:{TEXT("trolley_encoder"),TEXT("hoist_encoder"),TEXT("twistlock_load"),TEXT("twistlock_state"),TEXT("landed"),TEXT("agv_position_lidar")})
         if(!SensorKeys.Contains(Required)) {Error=FString(TEXT("Required sensor missing: "))+Required;return false;}
 
+    if(!Dynamics.Load(Settings,Error)) return false;
+    for(const auto& Mount:Dynamics.Mounts) if(!SensorKeys.Contains(Mount.Key)) {Error=TEXT("Unknown configured sensor mount");return false;}
     auto Snapshot=MakeShared<FJsonObject>();
     Snapshot->SetObjectField(TEXT("reference"),Ref); Snapshot->SetObjectField(TEXT("simulation_assumptions"),Settings);
-    Snapshot->SetStringField(TEXT("load_model"),TEXT("Quasi-static corner estimates; equivalent suspension; no individual rope or motor torque solver"));
+    Snapshot->SetStringField(TEXT("load_model"),TEXT("Site STS: reduced-order variable-length sway/yaw, taut four-corner tension allocation, hoist shaft torque. Assumed mounts/drive data; constrained roll/pitch. Legacy central path unchanged."));
     Snapshot->SetNumberField(TEXT("resolved_payload_limit_kg"),RatedPayloadKg);
     FJsonSerializer::Serialize(Snapshot,TJsonWriterFactory<>::Create(&SnapshotJson));
     bReady=true;

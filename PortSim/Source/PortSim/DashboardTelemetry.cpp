@@ -5,6 +5,7 @@
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "EngineUtils.h"
+#include "Engine/World.h"
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
@@ -94,6 +95,88 @@ TSharedRef<FJsonObject> APortWorkingCrane::DashboardState() const
     O->SetStringField(TEXT("model"),TEXT("kinematic_level_spreader"));
     if(bSTS)
     {
+        O->SetStringField(TEXT("model"),TEXT("reduced_order_taut_rope_sway_yaw"));
+        const auto& C=STSProfile.Dynamics;
+        const auto& D=SuspensionState;
+        auto Physics=Object();
+        Physics->SetStringField(TEXT("provenance"),TEXT("unvalidated_simulation_assumptions"));
+        Physics->SetBoolField(TEXT("anti_sway"),C.AntiSway); Physics->SetBoolField(TEXT("anti_skew"),C.AntiSkew);
+        Physics->SetNumberField(TEXT("sway_deg"),D.SwayDegrees());
+        Physics->SetNumberField(TEXT("skew_deg"),FMath::RadiansToDegrees(D.Yaw));
+        Physics->SetNumberField(TEXT("skew_rate_deg_s"),FMath::RadiansToDegrees(D.YawRate));
+        Physics->SetNumberField(TEXT("skew_control_torque_nm"),D.ControlTorque);
+        Physics->SetNumberField(TEXT("motor_torque_each_nm"),D.MotorTorque);
+        Physics->SetNumberField(TEXT("motor_rpm"),D.MotorRPM);
+        Physics->SetNumberField(TEXT("motor_power_w"),D.MotorPower);
+        Physics->SetNumberField(TEXT("motor_count"),C.MotorCount);
+        Physics->SetNumberField(TEXT("reeving_parts_per_corner"),C.Parts);
+        Physics->SetBoolField(TEXT("saturated"),D.Saturated);
+        Physics->SetBoolField(TEXT("active"),bJobActive);
+        Vector(Physics,TEXT("offset_m"),D.Offset);
+        TArray<TSharedPtr<FJsonValue>> Wires;
+        for(int32 I=0;I<4;++I)
+        {
+            auto Wire=Object();
+            Wire->SetNumberField(TEXT("corner"),I);
+            Wire->SetNumberField(TEXT("tension_n"),D.Tension[I]);
+            Wire->SetNumberField(TEXT("estimated_extension_m"),D.Extension[I]);
+            Wire->SetNumberField(TEXT("limit_n"),C.RopeLimit);
+            const FVector Corner((I&1)?100:-100,(I&2)?520:-520,0);
+            Vector(Wire,TEXT("top_m"),Home+Orientation.RotateVector(FVector(Head.X,Head.Y,BeamZ)+Corner),.01f);
+            Vector(Wire,TEXT("bottom_m"),HeadPosition()+Orientation.RotateVector(FRotator(0,FMath::RadiansToDegrees(D.Yaw),0).RotateVector(Corner)),.01f);
+            Wires.Add(Value(Wire));
+        }
+        Physics->SetArrayField(TEXT("wires"),Wires); O->SetObjectField(TEXT("dynamics"),Physics);
+        TArray<TSharedPtr<FJsonValue>> Sensors;
+        for(int32 I=0;I<C.Mounts.Num() && I<SensorMarkers.Num();++I)
+        {
+            const auto& M=C.Mounts[I];const auto* Marker=SensorMarkers[I].Get();auto Sensor=Object();
+            Sensor->SetStringField(TEXT("key"),M.Key); Sensor->SetStringField(TEXT("frame"),M.Frame);
+            Sensor->SetStringField(TEXT("unit"),M.Unit);Sensor->SetStringField(TEXT("provenance"),TEXT("mixed_source_specs_and_unverified_installation"));
+            if(M.Reference.IsValid()) Sensor->SetObjectField(TEXT("reference"),M.Reference);
+            Vector(Sensor,TEXT("mount_position_m"),M.Position);
+            Vector(Sensor,TEXT("world_position_m"),Marker->GetComponentLocation(),.01f);
+            Vector(Sensor,TEXT("forward"),Marker->GetForwardVector());
+            Sensor->SetNumberField(TEXT("minimum"),M.Minimum);Sensor->SetNumberField(TEXT("maximum"),M.Maximum);Sensor->SetNumberField(TEXT("fov_deg"),M.Fov);
+            Sensor->SetBoolField(TEXT("scan"),M.Scan);
+            Sensor->SetNumberField(TEXT("geometry_sample_wall_hz"),1);
+            if(M.Key==TEXT("twistlock_load") || M.Key==TEXT("twistlock_state"))
+            {
+                TArray<TSharedPtr<FJsonValue>> Values;
+                for(int32 CornerIndex=0;CornerIndex<4;++CornerIndex)
+                    if(M.Key==TEXT("twistlock_load")) Values.Add(MakeShared<FJsonValueNumber>(Observation.CornerLoadsN[CornerIndex]));
+                    else Values.Add(MakeShared<FJsonValueBoolean>(Observation.Locked[CornerIndex]));
+                Sensor->SetArrayField(TEXT("values"),Values);
+            }
+            if(M.Key==TEXT("wind"))Sensor->SetNumberField(TEXT("value"),C.Wind.Size());
+            if(M.Key==TEXT("trolley_encoder"))Sensor->SetNumberField(TEXT("value"),M.ReadPosition(Observation.DrivePosition.X*.01));
+            if(M.Key==TEXT("hoist_encoder"))Sensor->SetNumberField(TEXT("value"),(BeamZ-Head.Z)*.01);
+            if(M.Key==TEXT("telescope_encoder"))Sensor->SetNumberField(TEXT("value"),12.192);
+            if(M.Key==TEXT("landed"))Sensor->SetBoolField(TEXT("value"),Observation.bLanded);
+            if(M.Key==TEXT("agv_position_lidar")) Sensor->SetBoolField(TEXT("agv_in_range"),IsValid(HandoverAGV)&&STSSensorContains(M.Key,HandoverAGV->CargoPosition()));
+            TArray<FVector> Locations;Locations.Add(M.Position);Locations.Append(M.AdditionalPositions);
+            TArray<TSharedPtr<FJsonValue>> Instances;
+            for(int32 InstanceIndex=0;InstanceIndex<Locations.Num();++InstanceIndex)
+            {
+                const FVector Origin=Marker->GetAttachParent()->GetComponentLocation()+Marker->GetAttachParent()->GetComponentQuat().RotateVector(Locations[InstanceIndex]*100);
+                auto Instance=Object();Vector(Instance,TEXT("mount_position_m"),Locations[InstanceIndex]);Vector(Instance,TEXT("world_position_m"),Origin,.01f);
+                TArray<TSharedPtr<FJsonValue>> Rays;
+                if(M.Scan) for(int32 Ray=0;Ray<9;++Ray)
+                {
+                    const FVector Direction=Marker->GetComponentQuat().RotateVector(FRotator(0,-M.Fov*.5+M.Fov*Ray/8.,0).Vector());
+                    const FVector End=Origin+Direction*M.Maximum*100.;
+                    FCollisionQueryParams Query(SCENE_QUERY_STAT(STSDashboardScanner),false);Query.AddIgnoredActor(this);
+                    FHitResult Hit;const bool Found=GetWorld()->LineTraceSingleByChannel(Hit,Origin+Direction*M.Minimum*100.,End,ECC_Visibility,Query);
+                    auto R=Object();Vector(R,TEXT("end_m"),Found?Hit.ImpactPoint:End,.01f);
+                    if(Found)R->SetNumberField(TEXT("distance_m"),FVector::Dist(Origin,Hit.ImpactPoint)*.01);else R->SetField(TEXT("distance_m"),MakeShared<FJsonValueNull>());
+                    Rays.Add(Value(R));
+                }
+                Instance->SetArrayField(TEXT("rays"),Rays);Instances.Add(Value(Instance));
+                if(InstanceIndex==0)Sensor->SetArrayField(TEXT("rays"),Rays);
+            }
+            Sensor->SetArrayField(TEXT("instances"),Instances);Sensors.Add(Value(Sensor));
+        }
+        O->SetArrayField(TEXT("mounted_sensors"),Sensors);
         Vector(O,TEXT("axis_velocity_mps"),AxisVelocity,.01f);
         O->SetNumberField(TEXT("rope_length_m"),(BeamZ-Head.Z)*.01);
         O->SetNumberField(TEXT("hoist_limit_mps"),STSProfile.HoistLimit(bCarrying && IsValid(CargoActor)?CargoActor->MassKg:0,bCarrying)*.01);

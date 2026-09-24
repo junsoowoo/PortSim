@@ -43,6 +43,12 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Operation") FString Fault;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Operation") TObjectPtr<APortContainerActor> CargoActor;
 private:
+    FSTSSuspension SuspensionState;
+    FVector SuspendedOffset=FVector::ZeroVector;
+    UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> SensorMarkers;
+    void BuildSTSSensors();
+    bool STSSensorContains(const FString& Key,FVector Point) const;
+    FVector SpreaderVelocity() const;
     FSTSOperatingProfile STSProfile;
     UPROPERTY() TObjectPtr<APortAGVActor> HandoverAGV;
     FVector AxisVelocity=FVector::ZeroVector;

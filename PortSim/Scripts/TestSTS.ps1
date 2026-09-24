@@ -56,6 +56,9 @@ foreach ($case in $cases) {
         Get-Content -LiteralPath $log -Tail 30
         throw "$case failed. See $log"
     }
+    if ($case -eq 'Profile' -and ($text -match 'Result=\{Fail' -or $text -notmatch 'Result=\{Success\}.*PortSim.STS.SuspensionAndDrives')) {
+        throw "STS dynamics automation failed or did not run. See $log"
+    }
     if ($case -eq 'Terminal') {
         $completedBatches = 0
         $reports = Get-ChildItem -LiteralPath (Join-Path $root 'Saved\Results') -Filter 'Terminal_*.csv' |

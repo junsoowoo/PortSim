@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "STSDynamics.h"
 
 /** Resolved SI/reference data at the UE boundary (cm, seconds, kg). Not a motor torque model. */
 struct FSTSOperatingProfile
@@ -26,6 +27,7 @@ struct FSTSOperatingProfile
     float AGVTolerance = 0, AGVHeadingTolerance = 0, SupportTolerance = 0;
     float ApproachSpeed = 0, ApproachDistance = 0, StageTimeout = 0, SwayLimitDegrees = 0;
     bool bAutoStart = true;
+    FSTSDynamicsConfig Dynamics;
 
     bool Load(const FString& ReferenceFile, const FString& SettingsFile);
     float HoistLimit(float PayloadKg, bool bLoaded) const;

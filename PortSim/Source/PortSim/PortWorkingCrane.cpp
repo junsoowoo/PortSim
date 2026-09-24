@@ -95,18 +95,20 @@ void APortWorkingCrane::Configure(int32 Number,bool bQuayside,FVector Source,FVe
     SetFolderPath(TEXT("PortSim/WorkingEquipment"));
 #endif
     ResetOperation();
+    if(bSTS && STSProfile.bReady) BuildSTSSensors();
     bSensorFault=FParse::Param(FCommandLine::Get(),TEXT("PortSimSTSSensorFault"));
     FParse::Value(FCommandLine::Get(),TEXT("PortSimSTSLockFault="),LockFault);
     if(bSTS && !STSProfile.bReady) Stop(TEXT("STS profile unavailable: ")+STSProfile.Error);
 }
 
 FVector APortWorkingCrane::Local(FVector World) const { return Orientation.UnrotateVector(World-Home); }
-FVector APortWorkingCrane::HeadPosition() const { return Home+Orientation.RotateVector(Head); }
+FVector APortWorkingCrane::HeadPosition() const { return Home+Orientation.RotateVector(Head+SuspendedOffset); }
 
 void APortWorkingCrane::ResetOperation()
 {
     if (!bConfigured) return;
     ClearSTSState();
+    SuspensionState=FSTSSuspension(); SuspendedOffset=FVector::ZeroVector;
     if (bExternalJobs)
     {
         if (IsValid(CargoActor)) CargoActor->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
@@ -158,12 +160,17 @@ void APortWorkingCrane::UpdateParts()
 {
     SetActorLocation(Home+Orientation.RotateVector(FVector(0,Head.Y,0)));
     Trolley->SetRelativeLocation(FVector(Head.X,0,BeamZ));
-    Spreader->SetRelativeLocation(FVector(Head.X,0,Head.Z));
+    Spreader->SetRelativeLocation(FVector(Head.X,0,Head.Z)+SuspendedOffset);
+    Spreader->SetRelativeRotation(FRotator(0,bSTS?FMath::RadiansToDegrees(SuspensionState.Yaw):0,0));
     for (int32 I=0;I<4;++I)
     {
-        const float Bottom=Head.Z+25;
-        Ropes[I]->SetRelativeLocation(FVector(Head.X+(I<2?-100:100),I%2?-520:520,(BeamZ+Bottom)*.5f));
-        Ropes[I]->SetRelativeScale3D(FVector(.06f,.06f,FMath::Max(1.f,BeamZ-Bottom)/100.f));
+        const FVector Corner((I&1)?100:-100,(I&2)?520:-520,0);
+        const FVector Top=FVector(Head.X,0,BeamZ)+Corner;
+        const FVector Bottom=FVector(Head.X,0,Head.Z)+SuspendedOffset+Spreader->GetRelativeRotation().RotateVector(Corner);
+        const FVector Delta=Top-Bottom;
+        Ropes[I]->SetRelativeLocation((Top+Bottom)*.5f);
+        Ropes[I]->SetRelativeRotation(FRotationMatrix::MakeFromZ(Delta).Rotator());
+        Ropes[I]->SetRelativeScale3D(FVector(.06f,.06f,FMath::Max(1.,Delta.Size())/100.));
     }
 }
 
@@ -213,7 +220,7 @@ void APortWorkingCrane::Advance(float Dt,bool bGlobalPaused)
     }
     // Pick and lift the next ship box while the vehicle is away; hold it safely
     // above the dock until the returning AGV is stopped beneath the spreader.
-    if (Stage==5 && !bDestinationReady) return;
+    if (Stage==5 && !bDestinationReady) { if(bSTS) MoveSTS(Head,Dt); return; }
     StageTime+=Dt;
     if (StageTime>(bSTS?STSProfile.StageTimeout:180.f)) { Stop(TEXT("Job stage timed out")); return; }
     const FVector Source=Local(Slots[SourceSlot]);
@@ -264,7 +271,7 @@ void APortWorkingCrane::Advance(float Dt,bool bGlobalPaused)
         CargoActor->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
         auto* Body=CargoActor->GetBody();
         Body->SetSimulatePhysics(false);
-        CargoActor->SetActorLocationAndRotation(HeadPosition()-FVector(0,0,WorkingCrane::LiftOffset),Orientation.Rotator());
+        CargoActor->SetActorLocationAndRotation(HeadPosition()-FVector(0,0,WorkingCrane::LiftOffset),Spreader->GetComponentRotation());
         CargoActor->AttachToComponent(Spreader,FAttachmentTransformRules::KeepWorldTransform);
         CargoActor->LocationOwner=bSTS?ECargoOwner::STS:ECargoOwner::RMG;
         bCarrying=true;

@@ -481,7 +481,7 @@ bool APortSiteLogistics::SaveReports() const
 {
     if(ReportBase.IsEmpty()) return false;
     IFileManager::Get().MakeDirectory(*FPaths::GetPath(ReportBase),true);
-    const FString Snapshot=TEXT("{\"site_suspension_model\":\"kinematic level spreader; synthetic sensors; quasi-static corner loads\",\"sts_profile\":")+
+    const FString Snapshot=TEXT("{\"site_suspension_model\":\"reduced-order sway/yaw; assumed mounts; taut-rope tension; hoist shaft torque\",\"sts_profile\":")+
         (STSProfile.SnapshotJson.IsEmpty()?TEXT("{}"):STSProfile.SnapshotJson)+TEXT("}");
     return FFileHelper::SaveStringToFile(ResultsCsv,*(ReportBase+TEXT(".csv")),FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM) &&
         FFileHelper::SaveStringToFile(Snapshot,*(ReportBase+TEXT("_profile.json")),FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
