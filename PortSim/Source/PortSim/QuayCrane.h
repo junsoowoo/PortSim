@@ -191,6 +191,12 @@ private:
     void TickFreeCamera(float WallDt);
     void MoveFreeCamera(FVector Input, FVector2D Look, float WallDt, bool Fast);
     void TestEquipmentAndCamera();
+    bool bPickupTest=false, bPickupSawTrial=false;
+    double PickupTestSeconds=0;
+    FString PickupTestCase;
+    UPROPERTY() TObjectPtr<APortWorkingCrane> PickupTestCrane;
+    void BeginPickupTest();
+    void TickPickupTest(float Dt);
     void FollowLoadedAGV();
     bool bFollowAGV=false;
     TWeakObjectPtr<APortAGVActor> FollowedAGV;

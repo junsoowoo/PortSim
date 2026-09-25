@@ -529,5 +529,27 @@
     }
   ],
   "sensor_reference_revision": "DGT-public-sensors-2026-09-24",
-  "sensor_reference_scope": "센서 제품 사양·설치 원칙을 기존 ZPMC 형상에 적용. DGT 실장 모델·절대 XYZ는 미확인. 현대 DGT의 크레인 치수와 Bromma 스프레더 질량은 적용하지 않음."
+  "sensor_reference_scope": "센서 제품 사양·설치 원칙을 기존 ZPMC 형상에 적용. DGT 실장 모델·절대 XYZ는 미확인. 현대 DGT의 크레인 치수와 Bromma 스프레더 질량은 적용하지 않음.",
+  "pickup_control": {
+    "kind": "unvalidated_simulation_assumptions",
+    "corner_tolerance_m": 0.02,
+    "vertical_tolerance_m": 0.02,
+    "relative_speed_mps": 0.03,
+    "yaw_tolerance_deg": 0.25,
+    "tilt_tolerance_deg": 0.5,
+    "seat_time_s": 0.7,
+    "lock_time_s": 0.3,
+    "lock_timeout_s": 2,
+    "alignment_timeout_s": 90,
+    "acquisition_radius_m": 1,
+    "trial_height_m": 0.3,
+    "trial_hold_s": 1,
+    "trial_timeout_s": 60,
+    "minimum_corner_fraction": 0.03,
+    "mass_stability_fraction": 0.02,
+    "max_attempts": 2,
+    "pose_bias_x_m": 0,
+    "pose_bias_y_m": 0,
+    "pose_bias_z_m": 0
+  }
 }

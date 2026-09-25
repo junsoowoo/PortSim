@@ -213,7 +213,7 @@ void APortWorkingCrane::Advance(float Dt,bool bGlobalPaused)
         SampleSTS();
         if(!STSProfile.bReady || !Observation.IsFresh(SimulationTime,STSProfile.SensorMaxAge))
         { Stop(TEXT("Required STS sensor observation invalid/stale")); return; }
-        if(bCarrying && (!Observation.AllLocked() || Observation.PayloadEstimateKg()>STSProfile.RatedPayloadKg || CargoActor->MassKg>STSProfile.RatedPayloadKg))
+        if(bCarrying && (!Observation.AllLocked() || Observation.DynamicPayloadEstimateKg()>STSProfile.RatedPayloadKg))
         { Stop(TEXT("Loaded hoist interlock: locks/load observation invalid")); return; }
         if(((Stage==5 && bDestinationReady) || Stage==6 || Stage==7) && !Observation.bAGVAligned)
         { Stop(TEXT("AGV alignment lost during STS handover")); return; }
@@ -223,7 +223,8 @@ void APortWorkingCrane::Advance(float Dt,bool bGlobalPaused)
     if (Stage==5 && !bDestinationReady) { if(bSTS) MoveSTS(Head,Dt); return; }
     StageTime+=Dt;
     if (StageTime>(bSTS?STSProfile.StageTimeout:180.f)) { Stop(TEXT("Job stage timed out")); return; }
-    const FVector Source=Local(Slots[SourceSlot]);
+    if(bSTS && Stage==2){AdvancePickup(Dt);return;}
+    const FVector Source=bSTS && Stage==3?Local(Pickup.TrialOrigin):Local(Slots[SourceSlot]);
     const FVector Destination=Local(Slots[1-SourceSlot]);
     FVector Target=Head;
     switch(Stage)
@@ -233,7 +234,11 @@ void APortWorkingCrane::Advance(float Dt,bool bGlobalPaused)
     case 2: Target=Source+FVector(0,0,WorkingCrane::LiftOffset); break;
     case 3: Target=FVector(Source.X,Source.Y,SafeZ); break;
     case 4: Target=FVector(Destination.X,Destination.Y,SafeZ); break;
-    case 5: Target=Destination+FVector(0,0,WorkingCrane::LiftOffset); break;
+    case 5:
+        // Pickup retains the achieved coupling offset. Compensate it from
+        // measurements so the cargo, rather than an ideal head centre, lands on the AGV.
+        Target=Destination+(bSTS?Orientation.UnrotateVector(Observation.SpreaderPosition-Observation.CargoPosition):FVector(0,0,WorkingCrane::LiftOffset));
+        break;
     case 6: Target=FVector(Destination.X,Destination.Y,SafeZ); break;
     case 7:
         SettleTime+=Dt;
@@ -244,22 +249,14 @@ void APortWorkingCrane::Advance(float Dt,bool bGlobalPaused)
         ++CompletedJobs;
         LastJobSeconds=JobSeconds; LastPausedSeconds=PausedSeconds;
         if (bExternalJobs) { bJobActive=false; CargoActor=nullptr; Stage=0; StageTime=SettleTime=0; return; }
-        SourceSlot=1-SourceSlot; Stage=0; StageTime=SettleTime=0; return;
+        SourceSlot=1-SourceSlot; Stage=0; StageTime=SettleTime=0;
+        if(bSTS){Pickup=FSTSPickupController();for(double& Progress:LockProgress)Progress=0;}
+        return;
     default: Stop(TEXT("Invalid job stage")); return;
     }
     if (!MoveHead(Target,Dt)) return;
     if (Stage==2)
     {
-        if(bSTS)
-        {
-            if(!Observation.bLanded) { SettleTime=0; return; }
-            SettleTime+=Dt;
-            if(SettleTime<STSProfile.SettleTime) return;
-            if(bDestinationReady && !Observation.bAGVAligned) { Stop(TEXT("STS handover requires stopped aligned AGV")); return; }
-            for(int32 I=0;I<4;++I) CornerLocked[I]=I!=LockFault;
-            SampleSTS(true);
-            if(!Observation.AllLocked()) { Stop(TEXT("Twist lock alignment failed")); return; }
-        }
         if (FVector::Dist(CargoActor->GetActorLocation(),Slots[SourceSlot])>10.f ||
             CargoActor->GetActorUpVector().Z<.99f || CargoActor->GetBody()->GetPhysicsLinearVelocity().Size()>5.f)
         {
@@ -285,6 +282,7 @@ void APortWorkingCrane::Advance(float Dt,bool bGlobalPaused)
             SettleTime+=Dt;
             if(SettleTime<STSProfile.SettleTime) return;
             for(bool& Locked:CornerLocked) Locked=false;
+            for(bool& Requested:Pickup.RequestLocks) Requested=false;
         }
         if (!DestinationClear()) { Stop(TEXT("Destination became occupied")); return; }
         CargoActor->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
@@ -305,11 +303,13 @@ bool APortWorkingCrane::ValidateOperation(FString& Error) const
     if (!bConfigured || !IsValid(CargoActor) || (!bExternalJobs && CargoActor->GetOwner()!=this) || !Fault.IsEmpty())
     { Error=FString::Printf(TEXT("Crane %d: configuration/cargo/fault: %s"),CraneID,*Fault); return false; }
     const FVector A=Local(Slots[0]), B=Local(Slots[1]);
-    if (Head.X<FMath::Min3(A.X,B.X,JobStartHead.X)-1 || Head.X>FMath::Max3(A.X,B.X,JobStartHead.X)+1 ||
-        Head.Y<FMath::Min3(A.Y,B.Y,JobStartHead.Y)-1 || Head.Y>FMath::Max3(A.Y,B.Y,JobStartHead.Y)+1 || Head.Z>SafeZ+1)
+    const double Margin=bSTS?STSProfile.Pickup.AcquisitionRadius:1;
+    if (Head.X<FMath::Min3(A.X,B.X,JobStartHead.X)-Margin || Head.X>FMath::Max3(A.X,B.X,JobStartHead.X)+Margin ||
+        Head.Y<FMath::Min3(A.Y,B.Y,JobStartHead.Y)-Margin || Head.Y>FMath::Max3(A.Y,B.Y,JobStartHead.Y)+Margin || Head.Z>SafeZ+1)
     { Error=TEXT("Crane left its reserved envelope"); return false; }
     if (bCarrying && (CargoActor->GetAttachParentActor()!=this || CargoActor->GetBody()->IsSimulatingPhysics() ||
-        !CargoActor->GetActorLocation().Equals(HeadPosition()-FVector(0,0,WorkingCrane::LiftOffset),1.f)))
+        (bSTS?!CargoActor->GetActorTransform().Equals(LockedCargoTransform*Spreader->GetComponentTransform(),1.f):
+            !CargoActor->GetActorLocation().Equals(HeadPosition()-FVector(0,0,WorkingCrane::LiftOffset),1.f))))
     { Error=TEXT("Locked cargo is detached or out of alignment"); return false; }
     if (!bCarrying && CargoActor->GetAttachParentActor() &&
         !(Stage<=2 && CargoActor->LocationOwner==ECargoOwner::AGV && !CargoActor->GetBody()->IsSimulatingPhysics()))

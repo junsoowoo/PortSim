@@ -56,7 +56,7 @@ foreach ($case in $cases) {
         Get-Content -LiteralPath $log -Tail 30
         throw "$case failed. See $log"
     }
-    if ($case -eq 'Profile' -and ($text -match 'Result=\{Fail' -or $text -notmatch 'Result=\{Success\}.*PortSim.STS.SuspensionAndDrives')) {
+    if ($case -eq 'Profile' -and ($text -match 'Result=\{Fail' -or $text -notmatch 'Result=\{Success\}.*PortSim.STS.SuspensionAndDrives' -or $text -notmatch 'Result=\{Success\}.*PortSim.STS.SensorPickup')) {
         throw "STS dynamics automation failed or did not run. See $log"
     }
     if ($case -eq 'Terminal') {

@@ -35,8 +35,11 @@ for(const [i,a] of byType('sts').sort((a,b)=>a.name.localeCompare(b.name)).entri
  for(const w of a.dynamics.wires){assert(w.tension_n>=0);assert(w.top_m.every(Number.isFinite));assert(w.bottom_m.every(Number.isFinite));}
  for(const m of a.mounted_sensors){assert(m.world_position_m.every(Number.isFinite));assert(m.minimum<m.maximum);assert.equal(m.rays.length,m.scan?9:0);for(const ray of m.rays)if(ray.distance_m!==null)assert(ray.distance_m>=m.minimum-.001&&ray.distance_m<=m.maximum+.001);}
  assert.equal(a.hoist_power_w,670000);assert(a.rated_payload_kg>65000);
+ assert.equal(a.pickup.corners.length,4);
+ for(const c of a.pickup.corners)assert(c.error_m.every(Number.isFinite));
+ if(a.busy&&a.carrying&&a.stage>=3)assert.equal(a.pickup.verified,true,'Full hoist requires verified trial lift');
  assert.equal(a.observation.corner_loads_n.length,4);assert.equal(a.observation.locks.length,4);
- if(a.carrying&&a.observation.valid)assert(Math.abs(a.observation.corner_loads_n.reduce((x,y)=>x+y,0)/9.80665-a.payload_kg)<1);
+ if(a.carrying&&a.observation.valid)assert(Math.abs(a.observation.corner_loads_n.reduce((x,y)=>x+y,0)/(9.80665+a.observation.hoist_acceleration_mps2)-a.payload_kg)<1);
 }
 for(const a of byType('agv')){
  if(a.sts)assert(byType('sts').some(s=>s.id===a.sts));

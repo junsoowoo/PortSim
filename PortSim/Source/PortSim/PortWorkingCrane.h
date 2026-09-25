@@ -46,6 +46,14 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Operation") TObjectPtr<APortContainerActor> CargoActor;
 private:
     FSTSSuspension SuspensionState;
+    FSTSPickupController Pickup;
+    double LockProgress[4]={0,0,0,0};
+    bool PhysicalSeating[4]={false,false,false,false};
+    FVector PlantAcceleration=FVector::ZeroVector;
+    FTransform LockedCargoTransform;
+    void AdvancePickup(float Dt);
+    void SamplePickupGeometry();
+
     FVector SuspendedOffset=FVector::ZeroVector;
     UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> SensorMarkers;
     void BuildSTSSensors();

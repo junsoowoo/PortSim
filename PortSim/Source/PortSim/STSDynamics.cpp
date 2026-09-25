@@ -91,7 +91,9 @@ void FSTSSuspension::Step(const FSTSDynamicsConfig& C,double Dt,double L,double 
     OffsetVelocity=(Offset-OldOffset)/Dt;
     const double Vertical=M*FMath::Max(.1,G+A.Z+L*Rate.SizeSquared());
     // Roll/pitch are constrained. Equal-compliance four-corner force/moment allocation.
-    const double EX=CoG.X-1.545*A.X/FMath::Max(.1,G+A.Z), EY=CoG.Y-1.545*A.Y/FMath::Max(.1,G+A.Z);
+    // With the centre of mass below the support plane, positive horizontal
+    // acceleration increases the reaction on the positive-axis corner.
+    const double EX=CoG.X+1.545*A.X/FMath::Max(.1,G+A.Z), EY=CoG.Y+1.545*A.Y/FMath::Max(.1,G+A.Z);
     for(int32 I=0;I<4;++I)
     {
         const double Fraction=(.5+((I&1)?1:-1)*EX/2.)*(.5+((I&2)?1:-1)*EY/10.4);

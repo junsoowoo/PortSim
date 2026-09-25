@@ -18,7 +18,9 @@ APortAGVActor* APortWorkingCrane::GetHandoverVehicle() const { return HandoverAG
 
 void APortWorkingCrane::ClearSTSState()
 {
-    AxisVelocity=FVector::ZeroVector;
+    AxisVelocity=PlantAcceleration=FVector::ZeroVector;
+    Pickup=FSTSPickupController();
+    for(int32 I=0;I<4;++I){LockProgress[I]=0;PhysicalSeating[I]=false;}
     Observation=FSTSObservation(); NextSample=0;
     JobSeconds=PausedSeconds=LastJobSeconds=LastPausedSeconds=0;
     HandoverAGV=nullptr;
@@ -58,21 +60,28 @@ void APortWorkingCrane::SampleSTS(bool Force)
     S.DriveVelocity=AxisVelocity;
     S.SpreaderPosition=HeadPosition()+Orientation.RotateVector(FVector(STSProfile.PositionBias));
     S.SpreaderVelocity=SpreaderVelocity();
-    S.CargoPosition=CargoActor->GetActorLocation();
+    S.CargoPosition=CargoActor->GetActorLocation()+Orientation.RotateVector(STSProfile.Pickup.PoseBias);
     S.CargoVelocity=bCarrying?S.SpreaderVelocity:CargoActor->GetBody()->GetPhysicsLinearVelocity();
     const FVector Gap=Orientation.UnrotateVector(S.SpreaderPosition-S.CargoPosition);
     S.bLanded=FMath::Abs(Gap.X)<=STSProfile.LandingTolerance && FMath::Abs(Gap.Y)<=STSProfile.LandingTolerance &&
         FMath::Abs(Gap.Z-154.5f)<=STSProfile.SeatingTolerance &&
         (S.SpreaderVelocity-S.CargoVelocity).Size()<=STSProfile.SettleSpeed &&
         FQuat::ErrorAutoNormalize(Orientation,CargoActor->GetActorQuat())<.02f;
+    // Plant-side virtual load cells: dynamic force/moment balance, independent of controller estimates.
     const FVector CoG=CargoActor->CoGOffsetCm;
-    const float Weight=bCarrying?FMath::Max(0.f,CargoActor->MassKg+STSProfile.MassBiasKg)*9.80665f:0;
+    const double EffectiveG=FMath::Max(.1,9.80665+PlantAcceleration.Z*.01);
+    const float Weight=bCarrying?CargoActor->MassKg*EffectiveG:0;
+    const double EX=CoG.X+(154.5-CoG.Z)*PlantAcceleration.X*.01/EffectiveG;
+    const double EY=CoG.Y+(154.5-CoG.Z)*PlantAcceleration.Y*.01/EffectiveG;
     for(int32 I=0;I<4;++I)
     {
         S.Locked[I]=CornerLocked[I];
-        S.CornerLoadsN[I]=Weight*(.5f+((I&1)?1:-1)*CoG.X/200.f)*(.5f+((I&2)?1:-1)*CoG.Y/1040.f);
+        S.CornerLoadsN[I]=FMath::Max(0.,Weight*(.5+((I&1)?1:-1)*EX/200.)*(.5+((I&2)?1:-1)*EY/1040.)+(bCarrying?STSProfile.MassBiasKg*9.80665/4:0));
     }
     S.bAGVAligned=AGVAligned(); S.bCargoSupported=CargoSupported(); S.SwayDegrees=SuspensionState.SwayDegrees();
+    S.SwayRate=SuspensionState.Rate; S.SkewDegrees=FMath::RadiansToDegrees(SuspensionState.Yaw);
+    S.HoistAcceleration=PlantAcceleration.Z;
+    SamplePickupGeometry();
     for(const auto& Mount:STSProfile.Dynamics.Mounts)
     {
         double Value=0; bool Required=true;
@@ -92,18 +101,24 @@ void APortWorkingCrane::SampleSTS(bool Force)
 bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
 {
     if(!STSProfile.ContainsTarget(Target)) { Stop(TEXT("Automatic target outside STS envelope")); return false; }
-    float Hoist=STSProfile.HoistLimit(bCarrying?CargoActor->MassKg:0,bCarrying);
+    const double ControlPayload=bCarrying?(Pickup.EstimateValid?Pickup.EstimatedMass:STSProfile.ContainerMassKg):0;
+    float Hoist=STSProfile.HoistLimit(ControlPayload,bCarrying);
     if(Stage==2 || Stage==5)
     {
         const float Distance=FMath::Abs(Target.Z-Observation.DrivePosition.Z);
         Hoist=FMath::Min(Hoist,FMath::Sqrt(FMath::Square(STSProfile.ApproachSpeed)+
             2.f*STSProfile.HoistAcceleration*FMath::Max(0.f,Distance-STSProfile.ApproachDistance)));
     }
+    if(Stage==2 && bCarrying) Hoist=FMath::Min(Hoist,STSProfile.ApproachSpeed);
     const auto& C=STSProfile.Dynamics;
     Hoist=FMath::Min(Hoist,float(C.MotorMaxRPM*2*PI/60*C.DrumRadius/(C.Parts*C.GearRatio)*100));
     const FVector Limits(STSProfile.TrolleySpeed,STSProfile.GantrySpeed,Hoist);
     const FVector Accelerations(STSProfile.TrolleyAcceleration,STSProfile.GantryAcceleration,STSProfile.HoistAcceleration);
+    // True mass/CoG below belong only to the actuator/suspension plant. Position feedback comes from sensors.
     const double Payload=bCarrying?CargoActor->MassKg:0, Mass=STSProfile.SpreaderMassKg+Payload;
+    const FVector MeasuredPosition=Local(Observation.SpreaderPosition);
+    const FVector MeasuredVelocity=Orientation.UnrotateVector(Observation.SpreaderVelocity);
+    const double Age=FMath::Max(0.,SimulationTime-Observation.Timestamp);
     const FVector CoG=bCarrying?CargoActor->CoGOffsetCm*.01*(Payload/Mass):FVector::ZeroVector;
     // Equal slices avoid a nanosecond remainder from float tick durations.
     // Interpolation can snap on that remainder and amplify acceleration/rope force.
@@ -116,8 +131,8 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
         const double Length=FMath::Max(.1,(BeamZ-Head.Z)*.01);
         for(int32 I=0;I<3;++I)
         {
-            const double Error=Target[I]-(Head[I]+SuspensionState.Offset[I]*100+STSProfile.PositionBias);
-            double Desired=.8*Error-.8*AxisVelocity[I];
+            const double Error=Target[I]-(MeasuredPosition[I]+MeasuredVelocity[I]*(Age+Substep*Step));
+            double Desired=.8*Error-.8*Observation.DriveVelocity[I];
 
             double Acceleration=Accelerations[I];
             if(I==2)
@@ -132,13 +147,14 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
             if(I<2)
             {
                 // Acceleration feedback damps the pendulum; velocity feedback here adds phase lag.
-                const double Command=C.HorizontalAcceleration(Error*.01,AxisVelocity[I]*.01,Length,SuspensionState.Rate[I])*100;
+                const double Command=C.HorizontalAcceleration(Error*.01,Observation.DriveVelocity[I]*.01,FMath::Max(.1,(BeamZ-Observation.DrivePosition.Z)*.01),Observation.SwayRate[I])*100;
                 AxisVelocity[I]=FMath::Clamp(AxisVelocity[I]+FMath::Clamp(Command,-Acceleration,Acceleration)*Step,-double(Limits[I]),double(Limits[I]));
             }
             else AxisVelocity[I]=FMath::FInterpConstantTo(AxisVelocity[I],FMath::Clamp(Desired,-double(Limits[I]),double(Limits[I])),Step,Acceleration);
             Head[I]+=AxisVelocity[I]*Step;
         }
-        SuspensionState.Step(C,Step,Length,-AxisVelocity.Z*.01,(AxisVelocity-Previous)*(.01/Step),AxisVelocity*.01,Mass,CoG,STSProfile.HoistPowerW);
+        PlantAcceleration=(AxisVelocity-Previous)/Step;
+        SuspensionState.Step(C,Step,Length,-AxisVelocity.Z*.01,PlantAcceleration*.01,AxisVelocity*.01,Mass,CoG,STSProfile.HoistPowerW);
         if(!SuspensionState.Fault.IsEmpty()) {Stop(SuspensionState.Fault);return false;}
     }
     SuspendedOffset=SuspensionState.Offset*100;
@@ -146,8 +162,8 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
     Head.Z=FMath::Clamp(Head.Z,-double(STSProfile.LiftBelowRail),double(STSProfile.LiftAboveRail));
     UpdateParts();
     const float PositionTolerance=(Stage==2 || Stage==5)?.5f:5.f;
-    return (Head+SuspendedOffset+FVector(STSProfile.PositionBias)).Equals(Target,PositionTolerance) && SpreaderVelocity().Size()<PositionTolerance &&
-        SuspensionState.SwayDegrees()<STSProfile.SwayLimitDegrees && FMath::Abs(FMath::RadiansToDegrees(SuspensionState.Yaw))<C.SkewLimit;
+    return MeasuredPosition.Equals(Target,PositionTolerance) && Observation.SpreaderVelocity.Size()<PositionTolerance &&
+        Observation.SwayDegrees<STSProfile.SwayLimitDegrees && FMath::Abs(Observation.SkewDegrees)<C.SkewLimit;
 }
 
 FVector APortWorkingCrane::SpreaderVelocity() const

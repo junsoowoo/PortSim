@@ -219,3 +219,5 @@ STS 인계 이벤트를 AGV 운반·RMG 적재에 연결하고 전체 작업 시
 | 3 | AGV/RMG 상세 사양, 선박/안벽 기준 좌표 | 전체 하역 체인 확대 |
 
 없는 수치는 제조사 확정값처럼 채우지 않고, 향후 실험용 값을 넣을 때에도 별도 `simulation_assumption` 프로파일로 관리한다.
+
+센서 기반 자동 픽업 제어 및 시험: [SensorPickup.md](SensorPickup.md).

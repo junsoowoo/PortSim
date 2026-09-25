@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "STSDynamics.h"
+#include "STSPickupController.h"
 
 /** Resolved SI/reference data at the UE boundary (cm, seconds, kg). Not a motor torque model. */
 struct FSTSOperatingProfile
@@ -28,6 +29,7 @@ struct FSTSOperatingProfile
     float ApproachSpeed = 0, ApproachDistance = 0, StageTimeout = 0, SwayLimitDegrees = 0;
     bool bAutoStart = true;
     FSTSDynamicsConfig Dynamics;
+    FSTSPickupConfig Pickup;
 
     bool Load(const FString& ReferenceFile, const FString& SettingsFile);
     float HoistLimit(float PayloadKg, bool bLoaded) const;
@@ -46,10 +48,16 @@ struct FSTSObservation
     FVector SpreaderPosition = FVector::ZeroVector, SpreaderVelocity = FVector::ZeroVector;
     FVector CargoPosition = FVector::ZeroVector, CargoVelocity = FVector::ZeroVector;
     float SwayDegrees = 0;
-    float CornerLoadsN[4] = {0,0,0,0}; // quasi-static estimates, NOT solved corner reactions
+    float CornerLoadsN[4] = {0,0,0,0}; // analytic virtual load cells including acceleration; not elastic contact reactions
     bool Locked[4] = {false,false,false,false};
     bool bLanded = false, bAGVAligned = false, bCargoSupported = false;
+    bool bTargetVisible=false, CornerSeated[4]={false,false,false,false};
+    FVector CornerError[4]={FVector::ZeroVector,FVector::ZeroVector,FVector::ZeroVector,FVector::ZeroVector};
+    FVector2D SwayRate=FVector2D::ZeroVector;
+    float RelativeYawDegrees=0, TargetTiltDegrees=0, SkewDegrees=0, HoistAcceleration=0;
+
     bool IsFresh(double Now, float MaxAge) const { return bValid && Now >= Timestamp && Now - Timestamp <= MaxAge; }
     bool AllLocked() const { return Locked[0] && Locked[1] && Locked[2] && Locked[3]; }
+    float DynamicPayloadEstimateKg() const { return (CornerLoadsN[0]+CornerLoadsN[1]+CornerLoadsN[2]+CornerLoadsN[3])/FMath::Max(1.f,9.80665f+HoistAcceleration*.01f); }
     float PayloadEstimateKg() const { return (CornerLoadsN[0]+CornerLoadsN[1]+CornerLoadsN[2]+CornerLoadsN[3])/9.80665f; }
 };

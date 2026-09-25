@@ -19,6 +19,8 @@ bool FSTSDynamicsTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("Eccentric load changes individual line tensions"),E.Tension[1]>E.Tension[0]);
     FSTSSuspension Up;Up.Step(C,.05,20,-1,FVector(0,0,1),FVector(0,0,1),17000,FVector::ZeroVector,P.HoistPowerW);
     TestTrue(TEXT("Upward acceleration raises line tension and motor torque"),Up.Tension[0]>D.Tension[0] && Up.MotorTorque>D.MotorTorque);
+    FSTSSuspension Horizontal;Horizontal.Step(C,.01,20,0,FVector(1,0,0),FVector::ZeroVector,17000,FVector::ZeroVector,P.HoistPowerW);
+    TestTrue(TEXT("Below-plane mass transfers load toward positive acceleration"),Horizontal.Tension[1]>Horizontal.Tension[0]);
     FSTSSuspension On,Off;On.Yaw=Off.Yaw=.08;
     auto NoControl=C;NoControl.AntiSkew=false;
     for(int32 I=0;I<2400;++I) {On.Step(C,1./120.,20,0,FVector::ZeroVector,FVector::ZeroVector,17000,FVector::ZeroVector,P.HoistPowerW);Off.Step(NoControl,1./120.,20,0,FVector::ZeroVector,FVector::ZeroVector,17000,FVector::ZeroVector,P.HoistPowerW);}

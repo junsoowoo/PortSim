@@ -143,7 +143,7 @@ bool FSTSOperatingProfile::Load(const FString& ReferenceFile, const FString& Set
     for(const TCHAR* Required:{TEXT("trolley_encoder"),TEXT("hoist_encoder"),TEXT("twistlock_load"),TEXT("twistlock_state"),TEXT("landed"),TEXT("agv_position_lidar")})
         if(!SensorKeys.Contains(Required)) {Error=FString(TEXT("Required sensor missing: "))+Required;return false;}
 
-    if(!Dynamics.Load(Settings,Error)) return false;
+    if(!Pickup.Load(Settings,Error) || !Dynamics.Load(Settings,Error)) return false;
     for(const auto& Mount:Dynamics.Mounts) if(!SensorKeys.Contains(Mount.Key)) {Error=TEXT("Unknown configured sensor mount");return false;}
     auto Snapshot=MakeShared<FJsonObject>();
     Snapshot->SetObjectField(TEXT("reference"),Ref); Snapshot->SetObjectField(TEXT("simulation_assumptions"),Settings);

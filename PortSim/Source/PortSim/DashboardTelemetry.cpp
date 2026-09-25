@@ -179,7 +179,8 @@ TSharedRef<FJsonObject> APortWorkingCrane::DashboardState() const
         O->SetArrayField(TEXT("mounted_sensors"),Sensors);
         Vector(O,TEXT("axis_velocity_mps"),AxisVelocity,.01f);
         O->SetNumberField(TEXT("rope_length_m"),(BeamZ-Head.Z)*.01);
-        O->SetNumberField(TEXT("hoist_limit_mps"),STSProfile.HoistLimit(bCarrying && IsValid(CargoActor)?CargoActor->MassKg:0,bCarrying)*.01);
+        const double ControlMass=bCarrying?(Pickup.EstimateValid?Pickup.EstimatedMass:STSProfile.ContainerMassKg):0;
+        O->SetNumberField(TEXT("hoist_limit_mps"),STSProfile.HoistLimit(ControlMass,bCarrying)*.01);
         O->SetNumberField(TEXT("rated_payload_kg"),STSProfile.RatedPayloadKg);
         O->SetNumberField(TEXT("trolley_limit_mps"),STSProfile.TrolleySpeed*.01);
         O->SetNumberField(TEXT("gantry_limit_mps"),STSProfile.GantrySpeed*.01);
@@ -196,6 +197,29 @@ TSharedRef<FJsonObject> APortWorkingCrane::DashboardState() const
         Vector(S,TEXT("drive_position_m"),Observation.DrivePosition,.01f);
         Vector(S,TEXT("drive_velocity_mps"),Observation.DriveVelocity,.01f);
         S->SetNumberField(TEXT("sway_deg"),Observation.SwayDegrees);
+        S->SetNumberField(TEXT("hoist_acceleration_mps2"),Observation.HoistAcceleration*.01);
+        auto Pick=Object();
+        Pick->SetStringField(TEXT("phase"),Stage<2?TEXT("approach"):Pickup.PhaseName());
+        Pick->SetStringField(TEXT("reason"),Pickup.Reason);
+        Pick->SetBoolField(TEXT("target_visible"),Observation.bTargetVisible);
+        Pick->SetBoolField(TEXT("verified"),Pickup.EstimateValid);
+        Pick->SetNumberField(TEXT("attempts"),Pickup.Attempts);
+        Pick->SetNumberField(TEXT("stable_seconds"),Pickup.StableTime);
+        Pick->SetNumberField(TEXT("estimated_mass_kg"),Pickup.EstimatedMass);
+        Pick->SetNumberField(TEXT("relative_yaw_deg"),Observation.RelativeYawDegrees);
+        Pick->SetNumberField(TEXT("target_tilt_deg"),Observation.TargetTiltDegrees);
+        Vector(Pick,TEXT("estimated_cog_m"),Pickup.EstimatedCoG,.01);
+        Vector(Pick,TEXT("command_target_m"),Pickup.Target,.01);
+        TArray<TSharedPtr<FJsonValue>> Corners;
+        for(int32 I=0;I<4;++I)
+        {
+            auto Corner=Object();Corner->SetNumberField(TEXT("corner"),I+1);
+            Corner->SetBoolField(TEXT("seated"),Observation.CornerSeated[I]);
+            Corner->SetBoolField(TEXT("lock_requested"),Pickup.RequestLocks[I]);
+            Corner->SetBoolField(TEXT("locked"),Observation.Locked[I]);
+            Vector(Corner,TEXT("error_m"),Observation.CornerError[I],.01);Corners.Add(Value(Corner));
+        }
+        Pick->SetArrayField(TEXT("corners"),Corners);O->SetObjectField(TEXT("pickup"),Pick);
         TArray<TSharedPtr<FJsonValue>> Loads,Locks;
         for(int32 I=0;I<4;++I)
         {

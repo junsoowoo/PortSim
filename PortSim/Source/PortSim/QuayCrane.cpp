@@ -212,6 +212,7 @@ void AQuayCrane::BeginPlay()
     bTerminalMode = !bSmokeTest;
     bUnifiedTerminal=bTerminalMode && !bTerminalTest && !FParse::Param(FCommandLine::Get(),TEXT("PortSimLegacyTerminal"));
     InitializeSTSProfile();
+    if(FParse::Param(FCommandLine::Get(),TEXT("PortSimPickupTest"))){BeginPickupTest();return;}
     if (FParse::Param(FCommandLine::Get(),TEXT("PortSimSpeedTest")))
     {
         bool Pass=true;
@@ -390,6 +391,7 @@ void AQuayCrane::UpdateRopes()
 void AQuayCrane::Tick(float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
+    if(bPickupTest){TickPickupTest(DeltaSeconds);return;}
     // World timers, control and Chaos consume the same accelerated delta.
     // Chaos subdivides the frame into small physics steps.
     const float Dt=DeltaSeconds;

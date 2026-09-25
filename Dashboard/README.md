@@ -36,7 +36,7 @@
 
 ## 데이터 범위
 
-`Document/STS/STS_ReferenceData.json`과 `PortSim/Config/STS_Simulation.json`을 읽으며, 실행 기록이 있으면 **실제로 적용된 프로파일 스냅샷**을 우선 표시한다. 사이트 STS는 가변 길이 현수체 X/Y 흔들림과 yaw 동역학, 4개 코너 로프 장력 분배, 권상 모터 축 토크를 계산한다. 액터의 **물리 모델** 탭에서 확인한다. 코너 트위스트록 하중은 기존 준정적 관측값이며 와이어 장력과 구분한다.
+`Document/STS/STS_ReferenceData.json`과 `PortSim/Config/STS_Simulation.json`을 읽으며, 실행 기록이 있으면 **실제로 적용된 프로파일 스냅샷**을 우선 표시한다. 사이트 STS는 가변 길이 현수체 X/Y 흔들림과 yaw 동역학, 4개 코너 로프 장력 분배, 권상 모터 축 토크를 계산한다. 액터의 **물리 모델** 탭에서 확인한다. 코너 트위스트록 하중은 가속도를 반영한 가상 로드셀 값이며 와이어 장력과 구분한다.
 
 센서 설치, 드럼/감속기/로프 물성은 제조사 확인 전의 설정 가정이다. 모델의 식, 좌표계, 제어 연결과 한계는 [DynamicsModel.md](../Document/STS/DynamicsModel.md)에 정리했다. AGV/RMG 모터 상세 동역학은 이번 변경에 포함하지 않는다. 웹은 읽기 전용이며 설정 변경은 `STS_Simulation.json` 수정 후 엔진 재실행으로 적용한다.
 
@@ -54,3 +54,5 @@ node Dashboard/tests/telemetry.mjs
 상세 물리 적용 정상 회귀: 18건 운반 완료, 최종 적재 1,214.000018 시뮬레이션 초. 정착 시간과 제어가 달라진 결과로, 시간 절감 검증은 아니다.
 
 센서 자료 갱신: [SensorSourceApplication.md](../Document/STS/SensorSourceApplication.md). 제품 확인 사양과 파생/가정 설치 좌표를 구분하며 웹 센서 화면에서 출처·복수 스캐너를 조회한다.
+
+센서 기반 픽업: [SensorPickup.md](../Document/STS/SensorPickup.md). STS 개요/센서 탭에서 코너 접촉·잠금 피드백과 시험 인양 검증을 확인한다.
