@@ -16,7 +16,7 @@ public:
     void InitializeVehicle(int32 Number);
     void ResetVehicle(FVector Position);
     bool MoveToX(float X, float Dt);
-    bool MoveToPosition(FVector Target, float Dt);
+    bool MoveToPosition(FVector Target, float Dt, bool StopAtTarget=true);
     FVector CargoPosition() const;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AGV") int32 VehicleID=1;

@@ -12,7 +12,9 @@ class UHierarchicalInstancedStaticMeshComponent;
 struct FSiteYardSlot
 {
     FVector Position=FVector::ZeroVector;
-    int32 Block=0, Half=0, Color=0, Instance=INDEX_NONE;
+    int32 Block=0, Half=0, Crane=0, Color=0, Instance=INDEX_NONE;
+    FVector Handover=FVector::ZeroVector;
+    int32 Below=INDEX_NONE;
     bool Reserved=false, Occupied=true, Central=false;
     TWeakObjectPtr<UHierarchicalInstancedStaticMeshComponent> Mesh;
 };
@@ -26,10 +28,14 @@ struct FSiteShipCargo
 };
 struct FSiteTransfer
 {
-    int32 Cargo=INDEX_NONE, Slot=INDEX_NONE, RMG=INDEX_NONE, Stage=0, Waypoint=0;
+    int32 Cargo=INDEX_NONE, Slot=INDEX_NONE, RMG=INDEX_NONE, STS=INDEX_NONE, Stage=0, Waypoint=0;
     double Time=0, StartedAt=0, PausedSeconds=0, HandoverAt=-1, STSSeconds=0;
+    float StationaryTime=0;
+    FVector LastPosition=FVector::ZeroVector;
+    int32 LastStage=-1;
     TWeakObjectPtr<APortContainerActor> Actor;
     TArray<FVector> Route;
+    bool bYardReleased=false;
 };
 
 /** One manifest, conserved cargo IDs and reserved yard slots across STS -> AGV -> RMG. */
@@ -59,12 +65,16 @@ public:
     int32 ShipRemaining() const;
     int32 InTransit() const;
     bool IsIdle() const;
+    APortAGVActor* LoadedVehicle(APortAGVActor* Preferred=nullptr) const;
+    FString VehicleStatus() const;
     TArray<FVector> Snapshot() const;
     int32 InitialShipCount() const { return Manifest.Num()+CentralCount; }
     virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly) int32 BaselineYard=0;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly) int32 InitialYard=0;
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly) int32 ReceivingCapacity=0;
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly) int32 QueuedHandoffs=0;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly) int32 Delivered=0;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly) int32 DispatchLimit=MAX_int32;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly) FString Fault;
@@ -92,12 +102,21 @@ private:
     TArray<bool> BlocksBusy;
     TArray<bool> RMGBusy;
     TArray<int32> PreparedCargo;
-    TMap<int32,FBox> RoadReservations;
+    TArray<int32> STSOwners;
+    TArray<int32> NextVehicles;
+    TArray<bool> PreparedStarted;
+    TMap<int32,TArray<FBox>> RoadReservations;
+    TMap<int32,FVector> RoadTargets;
+    TMap<int32,int32> RoadBlockers;
+    float NoProgressTime=0;
+    int32 LastProgressDelivered=0;
     TSet<int32> FinishedRoadSegments;
     TArray<bool> SlotAssigned;
-    int32 CentralCount=0, Dispatched=0, LaneCount=8;
+    int32 CentralCount=0, Dispatched=0, LaneCount=8, YardCraneCount=36;
     bool bReady=false, bWasPaused=false;
     void Dispatch(int32 Lane);
+    void ScheduleFleet();
+    void ActivateVehicle(int32 Vehicle,int32 STS,bool FromQueue);
     void PrepareNextCargo(int32 Lane);
     bool ReserveYard(int32 Lane);
     void PrepareRoute(int32 Lane,bool Return);
@@ -105,5 +124,6 @@ private:
     void Freeze(bool Paused);
     void Stop(const FString& Reason);
     FVector QuayPark(int32 Lane) const;
+    FVector FleetPark(int32 Vehicle) const;
     FVector YardHandover(const FSiteYardSlot& Slot) const;
 };

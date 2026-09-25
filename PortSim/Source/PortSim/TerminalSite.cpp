@@ -90,24 +90,31 @@ void AQuayCrane::BuildTerminalSite()
                 {
                     const bool FormerSource=(Bay==4 || Bay==23) && Row==2;
                     const bool FormerDestination=(Bay==6 || Bay==25) && Row==4;
+                    const bool FourZones=bUnifiedTerminal && Block<5;
+                    if (FourZones && (Bay==6 || Bay==14 || Bay==21)) continue;
                     if (FormerDestination || (FormerSource && Tier>0)) continue;
                     if (!FormerSource && (Bay*7+Row+Block)%11==0) continue;
                     FSiteYardSlot Slot;
                     Slot.Position=FVector((205+Bay*13)*100,(Y+(Row-3)*3)*100,149.5f+Tier*259);
                     Slot.Block=Block; Slot.Half=Bay>=15?1:0; Slot.Color=(Bay+Row+Block)%4;
+                    const int32 Zone=FourZones?(Bay<7?0:Bay<15?1:Bay<22?2:3):Slot.Half;
+                    Slot.Crane=WorkingCranes.Num()+Zone;
+                    const float DockX=FourZones?(205.f+(Zone==0?0:Zone==1?7:Zone==2?15:22)*13.f):(Slot.Half?420.f:180.f);
+                    Slot.Handover=FVector(DockX*100,(Y+13.2f)*100,0);
                     YardSlots.Add(Slot);
                 }
         // Two disjoint work reservations per block: no shared gantry travel zone.
-        for (int32 Half=0;Half<2;++Half)
+        const int32 ZoneCount=bUnifiedTerminal && Block<5?4:2;
+        for (int32 Half=0;Half<ZoneCount;++Half)
         {
-            const float X=Half?517.f:270.f;
+            const float X=ZoneCount==4?(205.f+(Half==0?0:Half==1?7:Half==2?15:22)*13.f):(Half?517.f:270.f);
             auto* Crane=GetWorld()->SpawnActor<APortWorkingCrane>(FVector(X*100,Y*100,0),FRotator(0,90,0),Params);
             WorkingCranes.Add(Crane);
-            Crane->Configure(WorkingCranes.Num(),false,FVector((X-13)*100,(Y-3)*100,149.5f),FVector((X+13)*100,(Y+3)*100,149.5f),false);
+            Crane->Configure(WorkingCranes.Num(),false,FVector(X*100,(Y-3)*100,149.5f),FVector((X+13)*100,(Y+3)*100,149.5f),false);
         }
-        for (int32 Half=0;Half<2;++Half)
+        for (int32 Half=0;Half<ZoneCount;++Half)
         {
-            const float HX=Half?420.f:180.f;
+            const float HX=ZoneCount==4?(205.f+(Half==0?0:Half==1?7:Half==2?15:22)*13.f):(Half?420.f:180.f);
             Box(Roads,FVector(HX,Y+13.2f,.25),FVector(15,3.6,.06));
             for (float Side:{-1.f,1.f})
                 Box(White,FVector(HX,Y+13.2f+Side*1.8f,.30),FVector(15,.12,.02));
@@ -120,6 +127,12 @@ void AQuayCrane::BuildTerminalSite()
         TArray<float>{-450,-350,-250,-100,100,250,350,450};
     for (float Y:STSPositions)
     {
+        if (bUnifiedTerminal)
+        {
+            Box(Roads,FVector(55,Y+28,.25),FVector(4.2,15,.06));
+            for (float Side:{-1.f,1.f}) Box(White,FVector(55+Side*2.1f,Y+28,.31),FVector(.12,15,.02));
+            Label(TEXT("NEXT AGV"),FVector(55,Y+28,.4),1.f);
+        }
         auto* Crane=GetWorld()->SpawnActor<APortWorkingCrane>(FVector(1200,Y*100,0),FRotator::ZeroRotator,Params);
         WorkingCranes.Add(Crane);
     Crane->SetSTSProfile(STSProfile);
@@ -155,7 +168,7 @@ void AQuayCrane::BuildTerminalSite()
         Label(Name,FVector(X,Y,Size.Z+1),3.f);
     };
     Building(TEXT("1 OPERATIONS"),714,-190,FVector(45,65,28));
-    Building(TEXT("2 WORKER REST"),70,450,FVector(24,45,7));
+    Building(TEXT("2 WORKER REST"),714,-290,FVector(24,45,7));
     Building(TEXT("3 MAINTENANCE"),210,425,FVector(65,90,14));
     Building(TEXT("5 CIS"),710,20,FVector(40,40,9));
     Building(TEXT("6 SUBSTATION"),710,-400,FVector(30,45,8));
@@ -179,4 +192,5 @@ void AQuayCrane::BuildTerminalSite()
     Label(TEXT("DGT | BUSAN NEW PORT 7 | 1,050 m"),FVector(72,-200,.4),5.f);
     SiteLogistics->Initialize(WorkingCranes,MoveTemp(YardSlots),{Blue,Yellow,Red,Green},bUnifiedTerminal?0:24,FixedYard);
     SiteLogistics->RegisterBerthVehicles(AGVActors);
+    if (bUnifiedTerminal) BuildSupportFleet();
 }

@@ -26,6 +26,8 @@ public:
     double LastJobSeconds=0, LastPausedSeconds=0;
     FSTSObservation Observation;
     void SetDestinationReady(bool Ready) { bDestinationReady=Ready; }
+    void SetHandoverVehicle(APortAGVActor* Vehicle);
+    APortAGVActor* GetHandoverVehicle() const;
     bool IsBusy() const { return bJobActive; }
     UFUNCTION(BlueprintCallable, Category="Operation") void ResetOperation();
     UFUNCTION(BlueprintCallable, Category="Operation") void SetOperationPaused(bool Paused);

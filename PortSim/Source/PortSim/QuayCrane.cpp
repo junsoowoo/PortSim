@@ -256,7 +256,7 @@ void AQuayCrane::BeginPlay()
     { SiteCameraIndex=FocusIndex-1; FocusNextSiteCrane(); }
     float RequestedPlayback=1.f;
     const bool ExplicitPlayback=FParse::Value(FCommandLine::Get(),TEXT("PortSimPlayback="),RequestedPlayback);
-    if ((!bSmokeTest && !bTerminalTest && !FParse::Param(FCommandLine::Get(),TEXT("PortSimSiteTest"))) || ExplicitPlayback)
+    if ((!bSmokeTest && !bTerminalTest && !FParse::Param(FCommandLine::Get(),TEXT("PortSimSiteTest")) && !FParse::Param(FCommandLine::Get(),TEXT("PortSimFullUnloadTest"))) || ExplicitPlayback)
     {
         InstallPlaybackClock();
         while (SimulationSpeed<RequestedPlayback && GetSimulationSpeedStep()<Crane::SpeedLevelCount-1) IncreaseSimulationSpeed();
@@ -417,7 +417,7 @@ void AQuayCrane::Tick(float DeltaSeconds)
         }
         ++PlaybackTraceFrame;
     }
-    if (FParse::Param(FCommandLine::Get(), TEXT("PortSimCapture")))
+    if (FParse::Param(FCommandLine::Get(), TEXT("PortSimCapture")) && !FParse::Param(FCommandLine::Get(),TEXT("PortSimAGVProof")))
     {
         CaptureElapsed += WallDt;
         if (!bCaptureRequested && CaptureElapsed > 8.f)
@@ -442,6 +442,8 @@ void AQuayCrane::Tick(float DeltaSeconds)
             bHUDMouseReady=true;
         }
         if (PC->WasInputKeyJustPressed(EKeys::H)) ToggleHUD();
+        if (bUnifiedTerminal && PC->WasInputKeyJustPressed(EKeys::F))
+        { bFollowAGV=!bFollowAGV; FollowedAGV=nullptr; }
         if (FParse::Param(FCommandLine::Get(),TEXT("PortSimHUDTest")))
         {
             HUDTestElapsed+=DeltaSeconds;
@@ -474,10 +476,13 @@ void AQuayCrane::Tick(float DeltaSeconds)
             Status = bEmergencyStop ? TEXT("E-STOP: drives stopped; load physics remain active. Space to resume.") : TEXT("Drives enabled.");
         }
         if (bTerminalMode && PC->WasInputKeyJustPressed(EKeys::Home))
-        { CameraArm->SetRelativeLocation(FVector(35000,0,0)); CameraArm->TargetArmLength=185000.f; CameraArm->SetRelativeRotation(FRotator(-52,38,0)); }
+        { bFollowAGV=false; bFreeCamera=false; CameraArm->SetRelativeLocation(FVector(35000,0,0)); CameraArm->TargetArmLength=185000.f; CameraArm->SetRelativeRotation(FRotator(-52,38,0)); }
         if (bTerminalMode && PC->WasInputKeyJustPressed(EKeys::End))
-        { CameraArm->SetRelativeLocation(FVector(12000,0,500)); CameraArm->TargetArmLength=bUnifiedTerminal?65000.f:22000.f; }
+        { bFollowAGV=false; bFreeCamera=false; CameraArm->SetRelativeLocation(FVector(12000,0,500)); CameraArm->TargetArmLength=bUnifiedTerminal?65000.f:22000.f; }
         if (bTerminalMode && PC->WasInputKeyJustPressed(EKeys::Tab)) FocusNextSiteCrane();
+        TickFreeCamera(WallDt);
+        if (!bFreeCamera)
+        {
         const float Orbit = Axis(EKeys::Right, EKeys::Left);
         const float Pitch = Axis(EKeys::Up, EKeys::Down);
         FRotator Rotation = CameraArm->GetRelativeRotation();
@@ -485,12 +490,34 @@ void AQuayCrane::Tick(float DeltaSeconds)
         Rotation.Pitch = FMath::Clamp(Rotation.Pitch + Pitch * 25.f * WallDt, -80.f, -8.f);
         CameraArm->SetRelativeRotation(Rotation);
         CameraArm->TargetArmLength = FMath::Clamp(CameraArm->TargetArmLength + Axis(EKeys::PageDown, EKeys::PageUp) * FMath::Max(2500.f, CameraArm->TargetArmLength * .65f) * WallDt, 2500.f, bTerminalMode ? 220000.f : 42000.f);
+        }
     }
     if (bUnifiedTerminal)
     {
+        if (FParse::Param(FCommandLine::Get(),TEXT("PortSimEquipmentTest"))) { TestEquipmentAndCamera(); return; }
         SiteLogistics->BeginTrafficFrame();
         if (bAutoRunning && !bAutoPaused && !bEmergencyStop && SiteLogistics->Fault.IsEmpty()) AutoElapsed+=Dt;
         TickSiteOperations(Dt);
+        if (bFollowAGV) FollowLoadedAGV();
+        if (FParse::Param(FCommandLine::Get(),TEXT("PortSimAGVProof")))
+        {
+            CaptureElapsed+=WallDt;
+            bFollowAGV=true; FollowLoadedAGV();
+            if (FollowedAGV.IsValid())
+            {
+                if (!bProofStarted) { ProofVehicleStart=FollowedAGV->GetActorLocation(); bProofStarted=true; }
+                const float Distance=FVector::Distance(ProofVehicleStart,FollowedAGV->GetActorLocation());
+                if (!bCaptureRequested && Distance>1500)
+                {
+                    FString Error;
+                    const bool Valid=SiteLogistics->Validate(Error);
+                    UE_LOG(LogTemp,Display,TEXT("AGV_RENDER_PROOF_%s: AGV%d transported attached cargo %.1f cm; %s"),Valid?TEXT("PASS"):TEXT("FAIL"),FollowedAGV->VehicleID,Distance,*Error);
+                    FScreenshotRequest::RequestScreenshot(FPaths::ProjectSavedDir()/TEXT("Screenshots/AGV_LoadedMotion.png"),true,false);
+                    bCaptureRequested=true; CaptureElapsed=0;
+                }
+            }
+            if ((bCaptureRequested && CaptureElapsed>2) || CaptureElapsed>180) FPlatformMisc::RequestExit(false);
+        }
         AutoCompleted=Deliveries=SiteLogistics->Delivered;
         if (bAutoRunning && SiteLogistics->ShipRemaining()==0 && SiteLogistics->IsIdle())
         {
@@ -719,7 +746,9 @@ void APortSimHUD::DrawHUD()
     if (CranePawn->bUnifiedTerminal)
     {
         Line(CranePawn->GetFleetStatus(),FLinearColor(0.3f,0.8f,1.f));
-        Line(TEXT("3 ships x 528 containers | 9 STS / 9 AGV / 36 RMG"),FLinearColor::White);
+        Line(CranePawn->GetAGVStatus(),FLinearColor(1.f,.85f,.25f));
+        Line(TEXT("CC 9 (24-row) | TC 46 | AGV 60 | RS 4 | YT 18 | EH 2 | FL 7 | YC 74"),FLinearColor::White);
+        Line(TEXT("WASD move | Q/E down/up | RMB look | Shift boost"),FLinearColor::White);
         Line(TEXT("P pause/resume | Space E-stop | R reset | U resume unloading"),FLinearColor(0.3f,1.f,0.7f));
         Line(TEXT("Home overview | End middle berth | Tab next crane"),FLinearColor::White);
         Line(FString::Printf(TEXT("Elapsed %.1f s | %s"),CranePawn->AutoElapsed,

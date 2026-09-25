@@ -1,3 +1,5 @@
+> 보관 문서: 2026-09-25 upstream 병합 이전 배치 설명입니다. 아래 9 AGV / 36 RMG 수량과 초기 재고는 현재 기본 실행과 다릅니다. 현재 기본 구성은 STS 9기, AGV 60대, RMG 46기입니다.
+
 # 부산 신항 7부두(DGT)
 
 ## 규모
@@ -37,7 +39,7 @@ HUD는 선박·운송 중·야드·완료 수량과 오류를 표시한다.
 
 Scripts/TestSite.ps1: 기본 모드의 AGV 9대가 수행하는 총 18건 선박→STS→AGV→RMG→야드 운송, 동시 이동, STS 선행 인양, 재고 보존, 같은 화물 ID·액터 유지, 도로·슬롯 예약, 물리 적치, 복귀, 일시정지·비상정지·운송 중 리셋을 검사한다. 전체 1,584건을 완료시키는 장시간 처리량 시험은 아니다.
 Scripts/TestTerminal.ps1: 18개 야드로 분산하는 중앙 24개 양하·24개 역방향 적하 및 운반 리셋 검증. -PortSimTerminalTest -PortSimMixedTest를 함께 사용하면 주변 물류와 공유 도로·야드 예약도 검증한다.
-추가 STS의 프로파일·질량/무게중심 적용, 4코너 잠금, 시간 기록과 센서·잠금·과부하·AGV 위치 오류 차단도 검사한다. `-Mode Normal`/`-Mode Faults`로 분리 실행할 수 있다. 결과와 사용 모델은 `Saved/Results/Site_*.csv` 및 `_profile.json`에 저장되며, 상세 적용 범위는 [STS 런타임 안내](../Document/STS/RuntimeApplication.md)를 참고한다.
+추가 STS의 프로파일·질량/무게중심 적용, 4코너 잠금, 시간 기록과 센서·잠금·과부하·AGV 위치 오류 차단도 검사한다. `-Mode Normal`/`-Mode Faults`로 분리 실행할 수 있다. 결과와 사용 모델은 `Saved/Results/Site_*.csv` 및 `_profile.json`에 저장되며, 상세 적용 범위는 [STS 런타임 안내](RuntimeApplication.md)를 참고한다.
 캡처는 -PortSimCapture -PortSimHUDHidden, 근접 캡처는 -PortSimSiteFocus=0(RMG) 또는 =36(STS)을 추가한다.
 
 중앙 AGV도 공용 도로(X=125m/165m 차선)를 경유하며, 목적 야드 블록과 현재 이동 경로 구간을 예약한다. 주변 AGV와 동일한 경로 예약을 사용하므로 충돌하는 구간만 기다린다. 중앙 STS의 피드백 제어는 배속과 무관하게 1/60초 이하 간격으로 계산한다. 물리 시간과 재생 배속은 유지한다.

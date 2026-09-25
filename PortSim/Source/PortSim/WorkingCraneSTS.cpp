@@ -6,6 +6,16 @@
 #include "Engine/StaticMesh.h"
 
 // Site STS suspension integrates sway/yaw; sensor observations remain synthetic.
+void APortWorkingCrane::SetHandoverVehicle(APortAGVActor* Vehicle)
+{
+    // Fleet dispatch may bind an AGV after prefetch starts, before descent is enabled.
+    if(!bSTS || !bExternalJobs || !bJobActive || bDestinationReady) return;
+    HandoverAGV=Vehicle;
+    SampleSTS(true);
+}
+
+APortAGVActor* APortWorkingCrane::GetHandoverVehicle() const { return HandoverAGV.Get(); }
+
 void APortWorkingCrane::ClearSTSState()
 {
     AxisVelocity=FVector::ZeroVector;
@@ -95,9 +105,13 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
     const FVector Accelerations(STSProfile.TrolleyAcceleration,STSProfile.GantryAcceleration,STSProfile.HoistAcceleration);
     const double Payload=bCarrying?CargoActor->MassKg:0, Mass=STSProfile.SpreaderMassKg+Payload;
     const FVector CoG=bCarrying?CargoActor->CoGOffsetCm*.01*(Payload/Mass):FVector::ZeroVector;
-    for(double Remaining=Dt;Remaining>1.e-9;)
+    // Equal slices avoid a nanosecond remainder from float tick durations.
+    // Interpolation can snap on that remainder and amplify acceleration/rope force.
+    const int32 Substeps=FMath::Max(1,FMath::CeilToInt(double(Dt)*120.));
+    const double Step=double(Dt)/Substeps;
+    if(Step<=0) return false;
+    for(int32 Substep=0;Substep<Substeps;++Substep)
     {
-        const double Step=FMath::Min(Remaining,1./120.);Remaining-=Step;
         const FVector Previous=AxisVelocity;
         const double Length=FMath::Max(.1,(BeamZ-Head.Z)*.01);
         for(int32 I=0;I<3;++I)

@@ -253,7 +253,7 @@ void APortSiteLogistics::ExportDashboard(bool Paused,bool Force)
         {
             const bool STS=Crane->bSTS;
             O->SetStringField(TEXT("type"),STS?TEXT("sts"):TEXT("rmg"));
-            O->SetStringField(TEXT("name"),FString::Printf(TEXT("%s-%02d"),STS?TEXT("STS"):TEXT("RMG"),STS?Crane->CraneID-36:Crane->CraneID));
+            O->SetStringField(TEXT("name"),FString::Printf(TEXT("%s-%02d"),STS?TEXT("STS"):TEXT("RMG"),STS?Crane->CraneID-YardCraneCount:Crane->CraneID));
             auto Data=Crane->DashboardState();
             for(const auto& P:Data->Values) O->SetField(P.Key,P.Value);
         }
@@ -274,6 +274,8 @@ void APortSiteLogistics::ExportDashboard(bool Paused,bool Force)
             {
                 const auto& J=Jobs[Lane];
                 O->SetNumberField(TEXT("stage"),J.Stage);
+                O->SetStringField(TEXT("state"),!Fault.IsEmpty()?TEXT("fault"):(Paused?TEXT("paused"):(J.Stage?TEXT("working"):TEXT("idle"))));
+                if(J.STS!=INDEX_NONE) O->SetStringField(TEXT("sts"),Equipment[YardCraneCount+J.STS]->GetName());
                 O->SetNumberField(TEXT("job_seconds"),J.Time);
                 TArray<TSharedPtr<FJsonValue>> Route;
                 double Remaining=0; FVector P=V->GetActorLocation();

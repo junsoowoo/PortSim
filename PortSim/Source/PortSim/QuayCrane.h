@@ -104,6 +104,7 @@ public:
     void StartAutomatic(bool bLoad);
 
     FString GetFleetStatus() const;
+    FString GetAGVStatus() const;
     int32 GetShipCargoCount() const;
     const TCHAR* GetAutoStageName() const;
     float GetSwayDegrees() const;
@@ -186,6 +187,18 @@ private:
     void BuildYard();
     void BuildTerminal();
     void BuildTerminalSite();
+    void BuildSupportFleet();
+    void TickFreeCamera(float WallDt);
+    void MoveFreeCamera(FVector Input, FVector2D Look, float WallDt, bool Fast);
+    void TestEquipmentAndCamera();
+    void FollowLoadedAGV();
+    bool bFollowAGV=false;
+    TWeakObjectPtr<APortAGVActor> FollowedAGV;
+    FVector ProofVehicleStart=FVector::ZeroVector;
+    bool bProofStarted=false;
+    bool bFreeCamera=false;
+    bool bMouseLooking=false;
+    UPROPERTY() TArray<TObjectPtr<AActor>> SupportFleet;
     void TickSiteOperations(float Dt);
     void ResetSiteOperations();
     UPROPERTY() TObjectPtr<APortSiteLogistics> SiteLogistics;
