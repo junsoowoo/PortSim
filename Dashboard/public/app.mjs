@@ -1,5 +1,6 @@
 import {compareOperation, vesselDuration, formatDuration} from './metrics.mjs';
 import {renderFrictionDetails} from './friction-view.mjs';
+import {renderRSPhysics} from './rs-physics-view.mjs';
 import {renderAGVPhysics,renderAGVSensors} from './agv-physics-view.mjs';
 import {IncidentUI,refreshIncidentRuns} from './incident-view.mjs';
 import {weatherHoldStatus} from './scenario-view.mjs';
@@ -19,7 +20,7 @@ const labels={charging:'충전 중',to_charge:'충전소 이동',charge_return:'
 const dispatchReasons={admitted:'AGV · 야드 확보 완료',agv_approaching:'배정 AGV 접근 중',agv_returning:'배정 AGV 복귀 중',vehicle_pending:'실행 가능한 화물 · 차량 배정 대기',yard_support_pending:'야드 아래층 적재 대기',rmg_approach_reserved:'목적 RMG 접근 예약 대기',rmg_turn_clearance:'RMG 인수·출차 공간 대기',yard_block_reserved:'야드 블록 사용 중',yard_slot_unavailable:'목적 슬롯 사용 불가',source_not_ready:'선박 상부 화물·이전 배치 또는 작업 종료 확인'};
 const stages=['안전 높이 이동','픽업 위치 접근','착좌 · 잠금','화물 인양','인계 위치 이동','하강 · 인계','스프레더 회수','안착 확인'];
 const paths={grid:'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',crane:'M3 7h18M7 7V4h5l6 3M7 7v14M4 21h6M13 7v10m-3 0h6v4h-6zM18 7v14m-3 0h6',agv:'M3 9h18v8H3zM6 9V6h12v3M6 17v3m12-3v3M7 13h10',ship:'M3 13l9 4 9-4-3 7H6zM6 13V8h12v5M9 8V4h6v4M2 22l4-1 5 1 6-1 5 1',box:'M3 6h18v13H3zM7 6v13m5-13v13m5-13v13',sensor:'M12 11v2M8 8a6 6 0 0 0 0 8m8-8a6 6 0 0 1 0 8M4 4a11 11 0 0 0 0 16M20 4a11 11 0 0 1 0 16',chart:'M3 3v18h18M7 16l4-6 4 3 6-8',download:'M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5',search:'M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14m5 12 6 6',clock:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18m0 4v6l4 2'};
-Object.assign(paths,{weather:'M6 17h11a4 4 0 0 0 0-8 6 6 0 0 0-11-1 4.5 4.5 0 0 0 0 9M8 21l-1 2m7-2-1 2m7-2-1 2',pulse:'M2 12h4l3-8 5 16 3-8h5'});
+Object.assign(paths,{weather:'M6 17h11a4 4 0 0 0 0-8 6 6 0 0 0-11-1 4.5 4.5 0 0 0 0 9M8 21l-1 2m7-2-1 2',pulse:'M2 12h4l3-8 5 16 3-8h5'});
 Object.assign(labels,{emergency_hold:'작업자 안전정지 유지',emergency_braking:'물리 급제동',emergency_detection:'작업자 감지·반응 중'});
 function icon(name){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${paths[name]||paths.grid}"/></svg>`;}
 document.querySelectorAll('[data-icon]').forEach(e=>e.innerHTML=icon(e.dataset.icon));
@@ -107,7 +108,7 @@ function renderChrome(){
  $('#sidebar-status').textContent=live?'실행 데이터 수신 중':state?'마지막 기록 조회 중':'시뮬레이터 실행 대기';
  $('#kpis').className=view==='environment'?'weather-kpis':'kpis';
  const status=live?'엔진 연결됨':state?'저장된 실행 기록':'엔진 연결 대기';
- const playbackMode={replay:'사전 계산 재생',preparing:'재생 버퍼 준비',live_input_hold:'입력 반영 · 1배속',live_physics_batch:'자유 강체 · 고정 간격 배속',live_chaos:'자유 강체 · 실시간',live:'실시간'}[state?.playback_mode]||'실시간';
+ const playbackMode={replay:'사전 계산 재생',preparing:'재생 버퍼 준비',live_input_hold:'입력 반영 · 1배속',live_physics_batch:'고정 간격 배속',live_external_physics:'외부 물리 · 1배속',live_chaos:'자유 강체 · 실시간',live:'실시간'}[state?.playback_mode]||'실시간';
  $('#connection').className=`connection ${live?'live':''}`;
  $('#connection').innerHTML=`<span class="connection-dot"></span><strong>${status}</strong><span>· ${live?'1~2초 간격 갱신':state?`${num(age,0)}초 전 기록 · 현재 실시간 아님`:'언리얼에서 시뮬레이션을 실행하면 액터가 나타납니다.'}</span>${state?.paused?' · 일시정지':''}${state?' · '+weatherHoldStatus(state):''}<span class="tag">${state?esc(state.run_id.slice(0,21)): 'REFERENCE AVAILABLE'}</span>`;
  const fleet=actors().filter(a=>['sts','agv','rmg','rs'].includes(a.type)), running=fleet.filter(a=>a.state==='working').length;
@@ -198,7 +199,7 @@ function pickupDetails(a){
 }
 function overviewDetails(a){
  let html=illustration(a)+renderRecoveryDetails(a)+(['sts','rmg','agv'].includes(a.type)?'<button class="button fault-shortcut" data-tab="failures">장비 오류 발생 · 복구 →</button>':'');
- if(a.type==='rs')html+=kv('복구 상태',a.loaded_recovery_status||'복구 배정 대기')+kv('인양 한도 (모델 가정)',`${num(a.recovery_capacity_kg/1000)} t`)+(a.failed_agv?`<div class="kv-row"><span>고장 AGV</span>${actorLink(a.failed_agv)}</div>`:'')+(a.replacement_agv?`<div class="kv-row"><span>대체 AGV</span>${actorLink(a.replacement_agv)}</div>`:'');
+ if(a.type==='rs')html+=kv('복구 상태',a.loaded_recovery_status||'복구 배정 대기')+kv('남은 이동 경로',num(a.route_remaining_m??0)+' m')+kv('현재 속도',num(a.speed_mps??0,2)+' m/s')+kv('인양 한도 (모델 가정)',`${num(a.recovery_capacity_kg/1000)} t`)+(a.failed_agv?`<div class="kv-row"><span>고장 AGV</span>${actorLink(a.failed_agv)}</div>`:'')+(a.replacement_agv?`<div class="kv-row"><span>대체 AGV</span>${actorLink(a.replacement_agv)}</div>`:'');
  const p=a.payload_kg??a.mass_kg;
  html+=`<div class="key-values">${tile(a.type==='container'?'화물 질량':'운반 하중',Number.isFinite(p)?num(p/1000):'—','t')}${tile('높이 Z',num(a.head_position_m?.[2]??a.position_m?.[2]),'m')}${tile('완료 작업',num(a.completed??a.placed,0),'건')}${tile('작업 경과',formatDuration(a.job_seconds))}</div>`;
  if(a.fault)html=`<div class="fault-message">${esc(a.fault)}</div>`+html;
@@ -282,6 +283,7 @@ function sensorDetails(a){
 }
 function physicsDetails(a){return renderFrictionDetails(a)+physicsDetailsBase(a);}
 function physicsDetailsBase(a){
+ if(a.type==='rs')return renderRSPhysics(a);
  if(a.type==='agv')return renderAGVPhysics(a);
  if(a.dynamics)return dynamicsDetails(a);
  if(!['sts','rmg'].includes(a.type))return `<div class="detail-subhead">${esc(types[a.type]?.[0]||'액터')} 물리 상태</div>${a.type==='container'?kv('질량',`${num(a.mass_kg)} kg`)+kv('무게중심 편차',`${vector(a.cog_m)} m`)+kv('강체 시뮬레이션',a.simulating_physics?'활성':'고정 또는 장비에 부착')+kv('소유 단계',labels[a.state]||a.state):a.type==='agv'?kv('운반 모델','종축 전진/후진 + 조향 운동학')+kv('횡이동','비활성')+kv('최소 내측 회전반경','5.8 m')+kv('최고 속도',`${num(a.speed_limit_mps)} m/s`)+kv('가속도',`${num(a.acceleration_mps2)} m/s²`):kv('표현 방식',a.type==='vessel'?'매니페스트 기반 선박 그룹':a.type==='yard'?'컨테이너 인스턴스 블록':'엔진 액터')}<div class="note">${a.type==='agv'?'차체의 긴 축을 따라서만 이동하며, 조향 곡률은 5.8 m 회전반경으로 제한합니다. 차륜 토크·타이어 접촉·주행 모터의 상세 동역학은 아직 모델링하지 않았습니다.':a.type==='container'?'운반 중 장비에 부착되며 착지 과정에서 강체 물리를 사용합니다. 현재 상태에 따라 활성 여부가 달라집니다.':'이 그룹 자체의 별도 물리 관측값은 없습니다.'}</div>`;

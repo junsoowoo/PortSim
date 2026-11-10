@@ -49,7 +49,6 @@ bool FIncidentScenarioTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("Reboot retains the failed-sensor interlock"),V->bIncidentSensorFault&&V->IncidentSensorPhase==TEXT("rebooting"));
     Site->AdvanceIncidentScenarios(30);TestTrue(TEXT("Reboot cannot finish early"),V->bIncidentSensorFault);
     Site->AdvanceIncidentScenarios(31);TestFalse(TEXT("Sensor reboot finishes after its actual dwell"),V->bIncidentSensorFault);
-    TestTrue(TEXT("Scenario state disables unsupported future prediction"),Site->HasIncidentState());
     FJsonObject Cancel;Stamp(Cancel);Cancel.SetStringField(TEXT("action"),TEXT("scenario_cancel"));Cancel.SetStringField(TEXT("scenario_id"),TEXT("native"));
     TestTrue(TEXT("Cancellation retains already applied scenario history"),Site->ApplyDashboardCommand(Cancel,Error));
     TestTrue(TEXT("Weather is not silently reset by cancellation"),Owner->GetEnvironment()->IsRainEnabled());

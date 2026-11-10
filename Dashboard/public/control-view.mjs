@@ -90,12 +90,12 @@ export function impactOverlay(state,focus,X,Y,selected){
  for(const c of state?.incident_road_closures||[]){const p=c.min_m,q=c.max_m;if(!p||!q)continue;html+=`<rect class="incident-road-closure" x="${Math.min(X(p[0]),X(q[0]))}" y="${Math.min(Y(p[1]),Y(q[1]))}" width="${Math.max(4,Math.abs(X(q[0])-X(p[0])))}" height="${Math.max(4,Math.abs(Y(q[1])-Y(p[1])))}" fill="#e9855b" stroke="#b33b25" stroke-width="1.5"><title>돌발상황 · 도로 차단</title></rect>`;}
  for(const c of state?.incident_yard_blocks||[]){const p=c.position_m;if(p)html+=`<rect x="${X(p[0])-5}" y="${Y(p[1])-5}" width="10" height="10" fill="#e9855b"><title>목적 슬롯 점유</title></rect>`;}
  for(const e of activeEvents.slice(-40))html+=`<polyline class="plan-connection" points="${points([e.from_position_m,e.to_position_m])}"/>`;
- for(const a of actors.filter(a=>['sts','rmg','agv'].includes(a.type))){
+ for(const a of actors.filter(a=>['sts','rmg','agv','rs'].includes(a.type))){
   const p=mapPosition(a);if(!p)continue;
   if(a.fault||a.incident_pickup_failure||a.incident_placement_failure||a.incident_faults?.length)html+=`<circle class="fault-halo" cx="${X(p[0])}" cy="${Y(p[1])}" r="9"/>`;
   else if(related.has(a.id))html+=`<circle class="impact-halo" cx="${X(p[0])}" cy="${Y(p[1])}" r="7"/>`;
-  if(related.has(a.id)||a.id===selected){
-   if(a.type==='agv'&&a.route?.length)html+=`<polyline class="impact-route" points="${points([p,...a.route.map(n=>n.position_m)])}"/>`;
+  if(related.has(a.id)||a.id===selected||a.type==='rs'&&a.loaded_recovery_active){
+   if(['agv','rs'].includes(a.type)&&a.route?.length)html+=`<polyline class="impact-route" points="${points([p,...a.route.map(n=>n.position_m)])}"/>`;
   }
  }
  return `<g class="impact-overlay" pointer-events="none">${html}</g>`;

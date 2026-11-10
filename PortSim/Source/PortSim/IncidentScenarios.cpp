@@ -20,14 +20,6 @@ namespace
     { return S==TEXT("verified")||S==TEXT("rejected")||S==TEXT("timeout")||S==TEXT("cancelled")||S==TEXT("not_exercised"); }
 }
 
-bool APortSiteLogistics::HasIncidentState() const
-{
-    for(const auto& R:IncidentRuns)for(const auto& S:R.Steps)if(!Terminal(S.State))return true;
-    for(const auto& V:Vehicles)if(V->bIncidentSensorFault||V->bIncidentDestinationMismatch||!V->IncidentFaults.IsEmpty()||V->bIncidentNeedsPositionFix)return true;
-    for(const auto& K:Equipment)if(K->bIncidentPickupFailure||K->bIncidentPlacementFailure||!K->IncidentFaults.IsEmpty())return true;
-    return HasIncidentRoadClosure();
-}
-
 bool APortSiteLogistics::ValidateIncidentStep(const FJsonObject& C,FString& Error) const
 {
     const FString ID=String(C,TEXT("actor_id")),Action=String(C,TEXT("action")),Trigger=String(C,TEXT("trigger"),TEXT("immediate"));
