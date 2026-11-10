@@ -13,7 +13,7 @@ class FJsonObject;
 class APortSiteLogistics;
 
 UENUM(BlueprintType)
-enum class EPortCraneFault : uint8 { None, SensorUnavailable, Safety, GantryUnavailable, PickupUnavailable };
+enum class EPortCraneFault : uint8 { None, SensorUnavailable, Safety, GantryUnavailable, PickupUnavailable, EquipmentUnavailable };
 
 UENUM(BlueprintType)
 enum class EPortSensorRepairMethod : uint8 { Reboot, Technician };
@@ -60,10 +60,15 @@ public:
     UFUNCTION(BlueprintCallable,Category="Failures") void SetSensorFailure(bool Failed);
     UFUNCTION(BlueprintCallable,CallInEditor,Category="Failures") void RepairSensors() { SetSensorFailure(false); }
     UFUNCTION(BlueprintCallable,Category="Failures") void SetGantryFailure(bool Failed);
+    bool bIncidentPickupFailure=false,bIncidentPlacementFailure=false;
+    TSet<FString> IncidentFaults,IncidentResponses;
+    bool IncidentReleaseWindow() const;
+    bool IncidentHandoverWindow() const;
+    void SetEquipmentFailure(bool Failed);
     UFUNCTION(BlueprintCallable,CallInEditor,Category="Failures") void RepairEquipment();
     bool IsSensorUnavailable() const { return FaultType==EPortCraneFault::SensorUnavailable && !Fault.IsEmpty(); }
     bool IsPickupUnavailable() const { return FaultType==EPortCraneFault::PickupUnavailable && !Fault.IsEmpty(); }
-    bool IsEquipmentUnavailable() const { return IsSensorUnavailable() || IsPickupUnavailable() || (FaultType==EPortCraneFault::GantryUnavailable && !Fault.IsEmpty()); }
+    bool IsEquipmentUnavailable() const { return IsSensorUnavailable() || IsPickupUnavailable() || ((FaultType==EPortCraneFault::GantryUnavailable || FaultType==EPortCraneFault::EquipmentUnavailable) && !Fault.IsEmpty()); }
     int32 PickupRecoveryCount=0,TotalPickupRecoveryEvents=0;
     FString PickupRecoveryPhase;
     bool CanFaultEvacuate() const;

@@ -169,7 +169,7 @@ bool FTerminalReplay::Tick(AQuayCrane& Owner,double WallSeconds)
         return false;
     }
     if(FMath::IsFinite(WallSeconds) && WallSeconds>0.) Credit+=WallSeconds*Owner.SimulationSpeed;
-    if(!FTerminalCheckpoint::CanPredict(Owner) || (bBoundary && Future.IsEmpty()))
+    if(Site->HasIncidentState() || !FTerminalCheckpoint::CanPredict(Owner) || (bBoundary && Future.IsEmpty()))
     {
         Future.Reset(); FutureSteps.Reset(); FutureLogs.Reset(); Current.Reset(); bBoundary=false; State=TEXT("live_chaos");
         if(AdvanceLivePhysics(Owner)) return true;

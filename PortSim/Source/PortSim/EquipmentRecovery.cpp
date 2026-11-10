@@ -395,7 +395,7 @@ bool APortSiteLogistics::ReplanYardGroup(const TSet<int32>& Affected,const TSet<
         for(int32 S=0;S<Yard.Num();++S)
         {
             const auto& Slot=Yard[S];
-            if(!Slot.Reserved || Slot.Central || Slot.Occupied || Occupant[S]!=INDEX_NONE || Slot.LengthFt!=C->LengthFt ||
+            if(!Slot.Reserved || Slot.Central || Slot.Occupied || IsIncidentYardBlocked(S) || Occupant[S]!=INDEX_NONE || Slot.LengthFt!=C->LengthFt ||
                 !CraneAvailable(Slot.Crane) || !YardStackingPolicy::ZoneAccepts(Slot.Block,Info)) continue;
             if(!Equipment[Slot.Crane]->CanReach(YardHandover(Slot)+FVector(0,0,349.5f),Slot.Position)) continue;
             if(Info.HazardGroup==TEXT("none") && Info.HandlingType==TEXT("dry") &&

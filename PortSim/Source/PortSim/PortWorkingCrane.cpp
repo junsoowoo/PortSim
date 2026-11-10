@@ -265,6 +265,8 @@ void APortWorkingCrane::Stop(const FString& Reason,EPortCraneFault Kind)
     Fault=Reason; FaultType=Kind; SetOperationPaused(true);
     if(Kind==EPortCraneFault::PickupUnavailable)
     {PORTSIM_SIM_LOG(LogTemp,Warning,TEXT("EQUIPMENT_PICKUP_ISOLATED: crane=%d %s"),CraneID,*Reason);}
+    else if(Kind==EPortCraneFault::EquipmentUnavailable)
+    {PORTSIM_SIM_LOG(LogTemp,Warning,TEXT("EQUIPMENT_DEVICE_FAULT: crane=%d %s"),CraneID,*Reason);}
     else if(Kind==EPortCraneFault::SensorUnavailable || Kind==EPortCraneFault::GantryUnavailable)
     { PORTSIM_SIM_LOG(LogTemp,Warning,TEXT("EQUIPMENT_SENSOR_FAULT: crane=%d %s"),CraneID,*Reason); }
     else { PORTSIM_SIM_LOG(LogTemp,Error,TEXT("WORKING_CRANE_%d: %s"),CraneID,*Reason); }
@@ -330,6 +332,7 @@ void APortWorkingCrane::Advance(float Dt,bool bGlobalPaused)
 {
     if(bAppliedSensorFault!=bSensorFault) SetSensorFailure(bSensorFault);
     if(bAppliedGantryFault!=bGantryFault) SetGantryFailure(bGantryFault);
+    if(IncidentFaults.Contains(TEXT("equipment_failure"))&&FaultType!=EPortCraneFault::EquipmentUnavailable&&(Fault.IsEmpty()||IsEquipmentUnavailable()))SetEquipmentFailure(true);
     PortSimPerformance::FScope Profile(TEXT("crane_advance"));
     if(!FMath::IsFinite(Dt) || Dt<=0) { if(Dt==0)AdvanceStep(0,bGlobalPaused);return; }
     if(!bJobActive) { AdvanceStep(Dt,bGlobalPaused); return; }
@@ -391,6 +394,13 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
     }
     const bool bSTSNeedsAGV=AGVAtDestination() && !bAGVHandoverComplete && ((Stage==5 && bDestinationReady) || Stage==6 || Stage==7);
     const bool bRMGNeedsAGV=!AGVAtDestination() && Stage<=2 && IsValid(HandoverAGV);
+    if(IncidentFaults.Contains(TEXT("fail_hoist"))||
+        (IncidentFaults.Contains(TEXT("agv_unavailable"))&&IncidentHandoverWindow()))
+    {
+        if(IncidentFaults.Contains(TEXT("fail_hoist")))IncidentResponses.Add(TEXT("fail_hoist"));
+        if(IncidentFaults.Contains(TEXT("agv_unavailable"))&&IncidentHandoverWindow())IncidentResponses.Add(TEXT("agv_unavailable"));
+        SettleTime=0;MoveSTS(Head,Dt);return;
+    }
     if((bSTSNeedsAGV || bRMGNeedsAGV) && !Observation.bAGVAligned)
     {
         // A newly arrived vehicle can be visible one sensor period after the
@@ -432,7 +442,15 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
     // Pick and lift the next ship box while the vehicle is away; hold it safely
     // above the dock until the returning AGV is stopped beneath the spreader.
     if (Stage==5 && !bDestinationReady) { MoveSTS(StageHoldTarget,Dt); return; }
-    if(!bRailSafetyHold) StageTime+=Dt;
+    if(bIncidentPlacementFailure&&Stage==5)
+    {SettleTime=0;MoveSTS(Head,Dt);return;}
+    if(!bSTS&&Stage==5&&(IncidentFaults.Contains(TEXT("slot_occupied"))||IncidentFaults.Contains(TEXT("height_mismatch"))))
+    {
+        if(IncidentFaults.Contains(TEXT("slot_occupied")))IncidentResponses.Add(TEXT("slot_occupied"));
+        if(IncidentFaults.Contains(TEXT("height_mismatch")))IncidentResponses.Add(TEXT("height_mismatch"));
+        SettleTime=0;MoveSTS(Head,Dt);return;
+    }
+    if(!bRailSafetyHold && !(bIncidentPickupFailure&&Stage==2) && !(IncidentFaults.Contains(TEXT("fail_release"))&&Stage==5)) StageTime+=Dt;
     const double StageBudget=STSProfile.StageTimeout*(Stage==2?1+PickupRecoveryCount:1);
     if (StageTime>StageBudget) { Stop(TEXT("Job stage timed out")); return; }
     const FVector Source=Stage==3?Local(Pickup.TrialOrigin):Local(Slots[SourceSlot]);
@@ -499,6 +517,8 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
                 !Observation.CargoPosition.Equals(Slots[1-SourceSlot],STSProfile.LandingTolerance)) { SettleTime=0; return; }
             SettleTime+=Dt;
             if(SettleTime<STSProfile.SettleTime) return;
+            if(IncidentFaults.Contains(TEXT("fail_release")))
+            {IncidentResponses.Add(TEXT("fail_release"));return;}
             // Finish the receiving-side coupling before unlocking or lifting
             // the spreader. Failure leaves the load retained by this crane.
             if(!bSTS && bExternalJobs && AGVAtDestination() && !SecureRMGToAGV())

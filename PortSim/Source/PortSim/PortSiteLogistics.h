@@ -7,6 +7,7 @@
 #include "Async/Future.h"
 #include "UObject/UnrealType.h"
 #include "TrafficSpatialIndex.h"
+#include "IncidentScenarios.h"
 #include "PortSiteLogistics.generated.h"
 
 class FJsonObject;
@@ -110,6 +111,7 @@ class PORTSIM_API APortSiteLogistics : public AActor
     friend class FTerminalCheckpoint;
     friend class FTerminalReplay;
 public:
+    bool HasIncidentState() const;
     bool HasLoadedAGVRecovery() const { return !LoadedAGVRecoveries.IsEmpty(); }
     APortSiteLogistics();
     void SetSTSProfile(const FSTSOperatingProfile& Profile) { STSProfile=Profile; }
@@ -201,6 +203,25 @@ private:
     friend class FBlockedPickupDispatchTest;
     friend class FAGVLeasedEntryDockTest;
     friend class FMovingPickupRecoveryTest;
+    friend class FIncidentScenarioTest;
+    friend class FIncidentExtensionTest;
+    TArray<FPortIncidentRun> IncidentRuns;
+    double IncidentClock=0;
+    bool bIncidentInputUsed=false;
+    bool ApplyIncidentCommand(const FJsonObject& Command,FString& Error);
+    TMap<FString,FPortIncidentRoadClosure> IncidentRoadClosures;
+    TSet<int32> IncidentRouteWaiting;
+    TMap<int32,double> IncidentNextRouteAttempt;
+    TMap<FString,int32> IncidentBlockedYardSlots;
+    bool IsIncidentYardBlocked(int32 Slot) const;
+    bool ApplyExtendedIncident(const FJsonObject& Command,FString& Error,bool Clear=false);
+    bool ExtendedIncidentActive(const FString& Action,const APortAGVActor* V,const APortWorkingCrane* K) const;
+    bool ExtendedIncidentObserved(const FString& Action,const APortAGVActor* V,const APortWorkingCrane* K) const;
+    bool IncidentRoadBlocked(FVector A,FVector B,bool Record=false);
+    bool HasIncidentRoadClosure() const;
+    bool ValidateIncidentStep(const FJsonObject& Command,FString& Error) const;
+    void AdvanceIncidentScenarios(float Dt);
+    TSharedPtr<FJsonObject> CaptureIncidentScenarios() const;
     FString DashboardControlSession=FGuid::NewGuid().ToString(EGuidFormats::Digits);
     double NextControlPoll=0;
     TArray<TSharedPtr<FJsonObject>> DashboardCommandResults, RecoveryEvents;

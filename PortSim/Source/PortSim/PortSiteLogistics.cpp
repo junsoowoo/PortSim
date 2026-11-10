@@ -987,7 +987,7 @@ FString APortSiteLogistics::YardAdmissionReason(int32 Cargo,int32 Vehicle) const
         (Yard.IsValidIndex(Slot.Partner) && Yard[Slot.Partner].Below!=INDEX_NONE &&
             Yard[Yard[Slot.Partner].Below].Occupied);
     const bool OwnSlot=Jobs.IsValidIndex(Vehicle) && Jobs[Vehicle].Slot==Planned;
-    if(!Slot.Reserved || Slot.Central || Slot.Occupied || (SlotAssigned[Planned] && !OwnSlot) ||
+    if(!Slot.Reserved || Slot.Central || Slot.Occupied || IsIncidentYardBlocked(Planned) || (SlotAssigned[Planned] && !OwnSlot) ||
         (LaneCount==9 && Slot.LengthFt!=Manifest[Cargo].Actor->LengthFt)) return TEXT("yard_slot_unavailable");
     if((Slot.Below!=INDEX_NONE && !Yard[Slot.Below].Occupied) || (LaneCount==9 && !OtherPadSupported))
         return TEXT("yard_support_pending");
@@ -1071,7 +1071,7 @@ bool APortSiteLogistics::ReserveYard(int32 Lane)
         (Slot.LengthFt==20 && Slot.Below!=INDEX_NONE &&
             (!Yard.IsValidIndex(Slot.Partner) || Yard[Slot.Partner].Below==INDEX_NONE ||
                 !Yard[Yard[Slot.Partner].Below].Occupied)))) return false;
-    if (!Slot.Reserved || Slot.Central || Slot.Occupied || Job.Slot!=Planned || YardApproachOwners[YardApproachKey(Slot)]!=Lane || BlocksBusy[Slot.Block] ||
+    if (!Slot.Reserved || Slot.Central || Slot.Occupied || IsIncidentYardBlocked(Planned) || Job.Slot!=Planned || YardApproachOwners[YardApproachKey(Slot)]!=Lane || BlocksBusy[Slot.Block] ||
         RMGBusy[RMG] || Equipment[RMG]->IsBusy() || !Equipment[RMG]->Fault.IsEmpty() ||
         (CentralPending!=INDEX_NONE && Yard[CentralSlots[CentralPending]].Block==Slot.Block && YardApproachOwners[YardApproachKey(Slot)]!=Lane)) return false;
     const FVector Dock=YardHandover(Slot);
@@ -1561,6 +1561,7 @@ bool APortSiteLogistics::PlanRoadRoute(int32 Lane,bool Congested)
     const int32 ID=Vehicle->VehicleID;
     auto Cost=[&](FVector A,FVector B)
     {
+        if(IncidentRoadBlocked(A,B,true))return TNumericLimits<double>::Max();
         if(!Congested && Job.Stage!=5 && Job.Stage!=3) return 0.;
         const FVector Direction=(B-A).GetSafeNormal2D();
         const FVector Normal(-Direction.Y,Direction.X,0);
@@ -1792,6 +1793,7 @@ bool APortSiteLogistics::PlanRoadRoute(int32 Lane,bool Congested)
         if(!Candidate.IsEmpty() && FVector::DotProduct((Candidate[0]-Start).GetSafeNormal2D(),
             Vehicle->PlannedMotionDirection(Candidate[0]))<FMath::Cos(FMath::DegreesToRadians(30.f))) return false;
     }
+    {FVector Previous=Start;for(const auto& Point:Candidate){if(IncidentRoadBlocked(Previous,Point,true))return false;Previous=Point;}}
     if(SiteLogistics::RouteIntersectsContainer(Candidate,Start,Yard,Job.Stage==5?Job.Slot:INDEX_NONE))
     {
         PORTSIM_SIM_LOG(LogTemp,Error,TEXT("AGV_ROUTE_REJECTED: V%d planned path intersects an occupied yard container"),ID);
@@ -1854,6 +1856,7 @@ void APortSiteLogistics::PrepareRoute(int32 Lane,bool Return)
                 // a different free vehicle instead of stopping the terminal.
                 if(PlanRoadRoute(Lane,false)) return;
             }
+            if(HasIncidentRoadClosure()){IncidentRouteWaiting.Add(Lane);Job.Route.Reset();Job.Waypoint=0;return;}
             Stop(TEXT("No road route between berth and yard"));
         }
         return;
@@ -2000,6 +2003,13 @@ bool APortSiteLogistics::MoveVehicle(APortAGVActor* Vehicle,FVector Target,float
 {
     if (!bTrafficIndexReady) BeginTrafficFrame();
     const int32 FleetIndex=Vehicles.IndexOfByKey(Vehicle);
+    Vehicle->bIncidentRoadHold=IncidentRoadBlocked(Vehicle->GetActorLocation(),Target,true);
+    if(Vehicle->bIncidentRoadHold&&Jobs.IsValidIndex(FleetIndex)&&Vehicle->Speed<=.1f&&IncidentClock>=IncidentNextRouteAttempt.FindOrAdd(FleetIndex))
+    {
+        IncidentNextRouteAttempt[FleetIndex]=IncidentClock+5;
+        if(PlanRoadRoute(FleetIndex,true))
+        {Vehicle->bIncidentRoadHold=false;RecordRecoveryEvent(TEXT("road_rerouted"),Vehicle,Vehicle,Vehicle);return false;}
+    }
     if (Jobs.IsValidIndex(FleetIndex))
     {
         const auto& Job=Jobs[FleetIndex];
@@ -2486,7 +2496,14 @@ bool APortSiteLogistics::MoveVehicle(APortAGVActor* Vehicle,FVector Target,float
 bool APortSiteLogistics::Drive(int32 Lane,float Dt)
 {
     auto& Job=Jobs[Lane]; auto* Vehicle=Vehicles[Lane].Get();
-    if(Vehicle->bDriveFault) { Vehicle->SetFMSHold(true); return false; }
+    if(Vehicle->bDriveFault || Vehicle->bIncidentSensorFault) { Vehicle->SetFMSHold(true); return false; }
+    if(IncidentRouteWaiting.Contains(Lane))
+    {
+        if(IncidentClock<IncidentNextRouteAttempt.FindOrAdd(Lane))return false;
+        IncidentNextRouteAttempt[Lane]=IncidentClock+5;
+        if(!PlanRoadRoute(Lane,true)){Vehicle->SetFMSHold(true);return false;}
+        IncidentRouteWaiting.Remove(Lane);
+    }
     const int32 ID=Vehicle->VehicleID;
     if(const FVector* Recovery=TrafficRecoveryTargets.Find(ID))
     {
@@ -2675,6 +2692,7 @@ void APortSiteLogistics::Stop(const FString& Reason)
 void APortSiteLogistics::Advance(float Dt,bool Paused)
 {
     if(bReady && !FTerminalReplay::IsPredicting() && !FTerminalReplay::IsAdvancingPhysics()) ProcessDashboardCommands();
+    if(bReady&&!FTerminalReplay::IsPredicting()) AdvanceIncidentScenarios(Dt);
     if(!FTerminalReplay::IsPredicting() && !FTerminalReplay::IsAdvancingPhysics()) PortSimPerformance::Report(SimulationTime,Delivered,GetWorld());
     PortSimPerformance::FScope Profile(TEXT("site_advance"));
     if(!bReady) return;
@@ -2934,7 +2952,7 @@ void APortSiteLogistics::AdvanceStep(float Dt,bool Paused)
             // zero-speed stop can replace the physical test integration.
             continue;
         }
-        if(Vehicle->bDriveFault)
+        if(Vehicle->bDriveFault || Vehicle->bIncidentSensorFault)
         {
             Vehicle->SetFMSHold(true);
             if(Job.Stage && Job.Stage<FSiteTransfer::ToCharge) { Job.EquipmentDowntimeSeconds+=Dt; Job.bEquipmentWaiting=true; }
@@ -3092,6 +3110,8 @@ void APortSiteLogistics::AdvanceStep(float Dt,bool Paused)
             Job.Stage=3; break;
         case 3:
             if (!Drive(Lane,Dt)) break;
+            // A wrong destination instruction is rejected by the receiving manifest check.
+            if(Vehicle->bIncidentDestinationMismatch){Vehicle->SetFMSHold(true);Job.bEquipmentWaiting=true;break;}
             if(!Job.bRMGReserved)
             {
                 Job.Stage=9;
@@ -3203,6 +3223,11 @@ void APortSiteLogistics::ResetLogistics()
     ResetLoadedAGVRecoveries();
     PairedTrips=0; NextTripID=1;
     DashboardControlSession=FGuid::NewGuid().ToString(EGuidFormats::Digits);
+    IncidentRuns.Reset();IncidentClock=0;bIncidentInputUsed=false;
+    for(auto& R:IncidentRoadClosures)if(R.Value.Marker.IsValid())R.Value.Marker->Destroy();
+    IncidentRoadClosures.Reset();IncidentRouteWaiting.Reset();IncidentNextRouteAttempt.Reset();
+    IncidentBlockedYardSlots.Reset();
+    for(const auto& K:Equipment){K->bIncidentPickupFailure=K->bIncidentPlacementFailure=false;K->IncidentFaults.Reset();K->IncidentResponses.Reset();}
     DashboardCommandResults.Reset(); SeenDashboardCommands.Reset(); RecoveryEvents.Reset(); WorkerImpacts.Reset(); RecoverySequence=0; NextControlPoll=0;
     if(!InitialManifestPlan.IsEmpty()) Manifest=InitialManifestPlan;
     RebuildSTSStreams(); IsolatedEquipment.Reset(); DeferredYardLeases.Reset(); bRecoveryRailGuard=false;
@@ -3327,8 +3352,8 @@ bool APortSiteLogistics::Validate(FString& Error) const
             }
             if(!Vehicle->PayloadWithinReferenceLimit())
             { Error=FString::Printf(TEXT("AGV %d exceeded 65 t payload limit"),Vehicle->VehicleID); return false; }
-            if(Vehicle->Sensors.PositionErrorCm>AGVReference::PositionAccuracyCm+.01f)
-            { Error=FString::Printf(TEXT("AGV %d localization exceeded transponder accuracy"),Vehicle->VehicleID); return false; }
+            if(!Vehicle->LocalizationObservationValid())
+            { Error=FString::Printf(TEXT("AGV %d localization exceeded its valid fix/uncertainty bounds"),Vehicle->VehicleID); return false; }
             if(Vehicle->Sensors.bControlledStop && !Vehicle->Emergency.Active && Vehicle->Speed>.1f)
             { Error=FString::Printf(TEXT("AGV %d moved through a LiDAR controlled stop"),Vehicle->VehicleID); return false; }
             if(!Vehicle->Dynamics.Finite() || !Vehicle->Dynamics.Fault.IsEmpty())

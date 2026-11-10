@@ -121,13 +121,22 @@ TSharedRef<FJsonObject> APortWorkingCrane::DashboardState() const
     auto O=Object();
     O->SetStringField(TEXT("state"),!Fault.IsEmpty()?TEXT("fault"):(bFaultEvacuating?TEXT("working"):(bPaused?TEXT("paused"):(bJobActive?TEXT("working"):TEXT("idle")))));
     O->SetStringField(TEXT("fault"),Fault);
+    if(FaultType==EPortCraneFault::EquipmentUnavailable)O->SetStringField(TEXT("fault"),TEXT("장비 자체 오류 · 제어기 정지 · 화물·위치 유지"));
     O->SetStringField(TEXT("fault_scope"),Fault.IsEmpty()?TEXT(""):IsEquipmentUnavailable()?TEXT("equipment"):TEXT("terminal"));
     O->SetStringField(TEXT("recovery_status"),RecoveryStatus);
     O->SetBoolField(TEXT("sensor_failure"),bSensorFault);
+    O->SetStringField(TEXT("incident_sensor_phase"),bSensorFault?(bAutoSensorRecovery?SensorRepairPhase:TEXT("failed")):TEXT("healthy"));
     O->SetBoolField(TEXT("gantry_failure"),bGantryFault);
     O->SetBoolField(TEXT("pickup_failure"),IsPickupUnavailable());
     O->SetNumberField(TEXT("pickup_recovery_count"),PickupRecoveryCount);
     O->SetNumberField(TEXT("pickup_recovery_events"),TotalPickupRecoveryEvents);
+    O->SetBoolField(TEXT("incident_pickup_failure"),bIncidentPickupFailure);
+    O->SetBoolField(TEXT("incident_placement_failure"),bIncidentPlacementFailure);
+    TArray<TSharedPtr<FJsonValue>> IncidentValues;
+    for(const auto& Kind:IncidentFaults)IncidentValues.Add(MakeShared<FJsonValueString>(Kind));
+    O->SetArrayField(TEXT("incident_faults"),IncidentValues);
+    O->SetBoolField(TEXT("incident_release_blocked"),IncidentResponses.Contains(TEXT("fail_release"))&&IncidentFaults.Contains(TEXT("fail_release")));
+    O->SetNumberField(TEXT("incident_stack_height_bias_m"),IncidentFaults.Contains(TEXT("height_mismatch"))?.5:0);
     O->SetStringField(TEXT("pickup_recovery_phase"),PickupRecoveryPhase);
     O->SetBoolField(TEXT("auto_sensor_recovery"),bAutoSensorRecovery);
     O->SetStringField(TEXT("sensor_repair_method"),SensorRepairMethod==EPortSensorRepairMethod::Reboot?TEXT("reboot"):TEXT("technician"));
@@ -477,6 +486,24 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
     for(const auto& R:DashboardCommandResults) Results.Add(Value(CopyRecord(R)));
     for(const auto& E:RecoveryEvents) Events.Add(Value(CopyRecord(E)));
     Root->SetArrayField(TEXT("command_results"),Results);
+    Root->SetBoolField(TEXT("incident_control_supported"),true);
+    Root->SetNumberField(TEXT("incident_control_version"),2);
+    TArray<TSharedPtr<FJsonValue>> Closures,YardClosures;
+    for(const auto& R:IncidentRoadClosures)if(R.Value.Active)
+    {
+        auto Closure=Object();Closure->SetStringField(TEXT("cause_actor"),R.Key);
+        Vector(Closure,TEXT("min_m"),R.Value.Bounds.Min,.01);Vector(Closure,TEXT("max_m"),R.Value.Bounds.Max,.01);
+        Closure->SetBoolField(TEXT("response_observed"),R.Value.Responded);Closures.Add(Value(Closure));
+    }
+    for(const auto& R:IncidentBlockedYardSlots)if(Yard.IsValidIndex(R.Value))
+    {
+        auto Closure=Object();Closure->SetStringField(TEXT("cause_actor"),R.Key);Vector(Closure,TEXT("position_m"),Yard[R.Value].Position,.01);
+        Closure->SetNumberField(TEXT("slot"),R.Value);YardClosures.Add(Value(Closure));
+    }
+    Root->SetArrayField(TEXT("incident_road_closures"),Closures);Root->SetArrayField(TEXT("incident_yard_blocks"),YardClosures);
+    const auto Incidents=CaptureIncidentScenarios();
+    Root->SetNumberField(TEXT("incident_clock_seconds"),IncidentClock);
+    Root->SetArrayField(TEXT("incident_scenarios"),Incidents->GetArrayField(TEXT("runs")));
     Root->SetArrayField(TEXT("recovery_events"),Events);
     Root->SetNumberField(TEXT("simulation_seconds"),SimulationTime);
     if(const auto* Controller=Cast<AQuayCrane>(GetOwner()))
@@ -823,9 +850,21 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
                 O->SetNumberField(TEXT("recovery_cargo_count"),R.Cargo.Num());
             }
             O->SetBoolField(TEXT("drive_failure"),V->bDriveFault);
-            O->SetStringField(TEXT("fault"),V->bDriveFault?TEXT("주행 고장 · 위치와 화물을 유지하며 수리 대기"):TEXT(""));
-            O->SetStringField(TEXT("fault_scope"),V->bDriveFault?TEXT("equipment"):TEXT(""));
-            if(V->bDriveFault) O->SetStringField(TEXT("state"),TEXT("fault"));
+            O->SetBoolField(TEXT("incident_sensor_failure"),V->bIncidentSensorFault);
+            O->SetBoolField(TEXT("incident_destination_mismatch"),V->bIncidentDestinationMismatch);
+            O->SetNumberField(TEXT("incident_reboot_remaining"),V->IncidentRebootRemaining);
+            O->SetStringField(TEXT("incident_sensor_phase"),V->IncidentSensorPhase);
+            TArray<TSharedPtr<FJsonValue>> IncidentValues;
+            for(const auto& Kind:V->IncidentFaults)IncidentValues.Add(MakeShared<FJsonValueString>(Kind));
+            O->SetArrayField(TEXT("incident_faults"),IncidentValues);
+            O->SetNumberField(TEXT("incident_position_uncertainty_cm"),V->IncidentPositionUncertaintyCm);
+            O->SetBoolField(TEXT("incident_needs_position_fix"),V->bIncidentNeedsPositionFix);
+            O->SetBoolField(TEXT("incident_fms_packet_pending"),V->bIncidentFMSPending);
+            O->SetBoolField(TEXT("incident_road_hold"),V->bIncidentRoadHold);
+            const bool Incident=V->bDriveFault||V->bIncidentSensorFault||V->bIncidentDestinationMismatch||!V->IncidentFaults.IsEmpty()||V->bIncidentNeedsPositionFix;
+            O->SetStringField(TEXT("fault"),V->bDriveFault?TEXT("장비 자체 오류 · 구동 정지 · 수리 대기"):V->bIncidentSensorFault?(V->IncidentSensorPhase==TEXT("rebooting")?TEXT("센서 재부팅 중"):TEXT("센서 오류 · 재부팅 요청 대기")):V->bIncidentDestinationMismatch?TEXT("오배송 지시 · 목적지 확인·수정 필요"):TEXT(""));
+            O->SetStringField(TEXT("fault_scope"),Incident?TEXT("equipment"):TEXT(""));
+            if(Incident) O->SetStringField(TEXT("state"),TEXT("fault"));
             if(V->Emergency.Active)O->SetStringField(TEXT("state"),V->Emergency.Finished?TEXT("emergency_hold"):
                 V->Emergency.BrakeCommand?TEXT("emergency_braking"):TEXT("emergency_detection"));
         }
