@@ -178,6 +178,7 @@ TSharedRef<FJsonObject> APortWorkingCrane::DashboardState() const
     O->SetNumberField(TEXT("mean_cycle_seconds"),CompletedJobs?CompletedActive/CompletedJobs:0);
     O->SetNumberField(TEXT("mean_cycle_agv_wait_seconds"),CompletedJobs?CompletedAGVWaitSeconds/CompletedJobs:0);
     O->SetNumberField(TEXT("travel_response_ratio"),STSProfile.Dynamics.TravelResponseRatio);
+    O->SetBoolField(TEXT("coordinated_sts_travel"),bSTS && bCoordinatedSTSTravel);
     O->SetStringField(TEXT("cargo"),GetNameSafe(CargoActor));
     TArray<TSharedPtr<FJsonValue>> MapParts;
     auto MapPart=[&](const UStaticMeshComponent* Part){if(Part)MapParts.Add(MakeShared<FJsonValueObject>(DashboardLayout::Footprint(Part)));};

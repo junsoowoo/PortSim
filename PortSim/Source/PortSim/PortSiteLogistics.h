@@ -384,7 +384,11 @@ private:
     bool PlanYardDestinations();
     bool PlanLegacyYardDestinations();
     void PrepareRoute(int32 Lane,bool Return);
-    bool PlanRoadRoute(int32 Lane,bool Congested);
+    bool PlanRoadRoute(int32 Lane,bool Congested,bool RequireClearDeparture=false);
+    TArray<FBox> BuildRoadCorridor(const APortAGVActor& Vehicle,FVector Target,
+        const TArray<FVector>* Route,int32 Waypoint,int32 RouteEnd,bool LegacyYardEntry) const;
+    int32 FindRoadCorridorBlocker(const APortAGVActor& Vehicle,FVector Target,
+        const TArray<FBox>& Segments,const TArray<FVector>* Route,int32 Waypoint) const;
     bool Drive(int32 Lane,float Dt);
     void Freeze(bool Paused);
     void Stop(const FString& Reason);

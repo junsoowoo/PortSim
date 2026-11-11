@@ -34,6 +34,7 @@ public:
     bool AssignCargo(APortContainerActor* Cargo, FVector Source, FVector Destination, bool SourceSupport, bool DestinationSupport, APortAGVActor* HandoverVehicle=nullptr,bool ReverseTransfer=false);
     void UpdateShipLandingTarget(FVector Target);
     void SetSTSProfile(const FSTSOperatingProfile& Profile) { STSProfile=Profile; }
+    UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Operation") bool bCoordinatedSTSTravel=true;
     void SetWindVelocity(FVector WorldVelocityMetersPerSecond);
     void SetFogVisibilityMeters(float VisibilityMeters);
     void SetRainSensorRangeScales(float CameraScale,float LiDARScale);
@@ -120,6 +121,7 @@ private:
     friend class FMovingPickupRecoveryTest;
     friend class FLoggedSeaPickupTest;
     friend class FRMGAGVHandoverTest;
+    friend class FSTSCoordinatedTravelTest;
     bool SecureRMGToAGV();
     bool bAGVHandoverComplete=false;
     bool bReverseTransfer=false;
@@ -179,6 +181,7 @@ private:
     int32 LockFault=INDEX_NONE;
     void SampleSTS(bool Force=false);
     bool MoveSTS(FVector Target,float Dt);
+    bool STSTransferClear(FVector Target,bool Landing=false) const;
     bool CargoSupported() const;
     bool AGVAligned() const;
     void ClearSTSState();
