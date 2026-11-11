@@ -211,6 +211,8 @@ private:
     friend class FTrafficJunctionTest;
     friend class FEquipmentRecoveryTest;
     friend class FLoadedAGVRecoveryTest;
+    // Locked pending recovery workflow redesign.
+    static constexpr bool bLoadedAGVRecoveryEnabled=false;
     TArray<FLoadedAGVRecovery> LoadedAGVRecoveries;
     bool RequestLoadedAGVRecovery(int32 Failed,FString& Error);
     bool CanRecoverLoadedAGV(int32 Failed,FString& Error) const;

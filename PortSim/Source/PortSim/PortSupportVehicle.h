@@ -15,8 +15,8 @@ class PORTSIM_API APortSupportVehicle : public APortEquipmentActor
     GENERATED_BODY()
 public:
     void Configure(EPortSupportType Type,int32 Number);
-    void PositionRecoverySpreader(FVector Position,FRotator Rotation,float LengthCm);
     void StowRecoverySpreader();
+    void PositionRecoverySpreader(FVector Position,FRotator Rotation,float LengthCm);
     bool AdvanceRecoveryDrive(FVector Target,float Dt,bool Clear,bool Final,const FPortSurfaceState& Surface,const FPortFrictionSettings& Friction);
     bool AdvanceRecoveryHydraulics(FVector Target,FRotator Rotation,float LengthCm,float LoadKg,float Dt);
     void RefreshRecoveryLoad(float LoadKg,FVector WorldCoG,float Dt);

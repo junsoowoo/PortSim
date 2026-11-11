@@ -440,6 +440,7 @@ void APortSiteLogistics::ExportDashboard(bool Paused,bool Force)
         !Paused && Fault.IsEmpty() && Controller && Controller->GetEffectivePlaybackRate()>1.f);
     DashboardWrite=Async(EAsyncExecution::ThreadPool,[Snapshot=MoveTemp(Snapshot),Layout=MoveTemp(Layout),LayoutFile,Directory]() mutable
     {
+        PortSimPerformance::FScope OutputTiming(TEXT("dashboard_serialize_write"));
         // The entire JSON graph belongs to this task. No UObject access or shared
         // non-thread-safe JSON references survive on the game thread.
         const TSharedRef<FJsonObject> Root=MakeShareable(Snapshot.Release());
@@ -843,7 +844,7 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
             O->SetBoolField(TEXT("can_replace_loaded_agv"),CanRecoverLoadedAGV(Lane,RecoveryReason));
             O->SetStringField(TEXT("loaded_recovery_reason"),RecoveryReason);
             O->SetBoolField(TEXT("loaded_recovery_active"),IsLoadedRecoveryVehicle(Lane));
-            for(const auto& R:LoadedAGVRecoveries) if(R.Failed==Lane || R.Replacement==Lane)
+            for(const auto& R:LoadedAGVRecoveries) if((R.Phase<7) && (R.Failed==Lane || R.Replacement==Lane))
             {
                 O->SetStringField(TEXT("loaded_recovery_status"),R.Status);
                 O->SetNumberField(TEXT("loaded_recovery_phase"),R.Phase);
@@ -912,7 +913,7 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
             {
                 const bool Returning=R.Phase>=7;
                 O->SetStringField(TEXT("state"),Paused?TEXT("paused"):Returning?TEXT("returning"):TEXT("working"));
-                O->SetBoolField(TEXT("loaded_recovery_active"),true);
+                O->SetBoolField(TEXT("loaded_recovery_active"),!Returning);
                 O->SetStringField(TEXT("loaded_recovery_status"),R.Status);
                 O->SetNumberField(TEXT("loaded_recovery_phase"),R.Phase);
                 O->SetStringField(TEXT("failed_agv"),Vehicles[R.Failed]->GetName());
