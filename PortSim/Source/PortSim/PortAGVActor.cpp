@@ -112,6 +112,7 @@ void APortAGVActor::ResetVehicle(FVector Position)
     IncidentFaults.Reset();IncidentResponses.Reset();IncidentNavigationClock=IncidentPacketReadyAt=0;
     IncidentPositionUncertaintyCm=IncidentWheelMarkCm=0;bIncidentNeedsPositionFix=bIncidentFMSPending=false;IncidentPendingFMSNode=INDEX_NONE;
     bIncidentRoadHold=false;
+    bIncidentHandoverHold=false;
     DeckCoGOffsetCm=FVector::ZeroVector;
     Speed=0; CompletedJobs=0; PayloadKg=0; LastCurvaturePerCm=0;
     BatteryPercent=ChargeLimitPercent; bNeedsCharge=bCharging=false;

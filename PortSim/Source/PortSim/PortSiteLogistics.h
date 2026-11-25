@@ -8,6 +8,7 @@
 #include "UObject/UnrealType.h"
 #include "TrafficSpatialIndex.h"
 #include "IncidentScenarios.h"
+#include "EquipmentPerformance.h"
 #include "PortSiteLogistics.generated.h"
 
 class FJsonObject;
@@ -56,6 +57,7 @@ struct FSiteTransfer
     // Stage 10 is the second STS pickup of a paired 20 ft trip.
     static constexpr int32 ToCharge=11, ReturnToStandby=12, Charging=13, ToRecovery=14;
     int32 Cargo=INDEX_NONE, Slot=INDEX_NONE, RMG=INDEX_NONE, STS=INDEX_NONE, Stage=0, Waypoint=0;
+    int32 FixedPickupPadSTS=INDEX_NONE; // an STS reassignment keeps the original AGV docking point
     int32 ExtraCargo=INDEX_NONE;
     bool bLoadingExtra=false;
     int32 TripID=0;
@@ -74,6 +76,9 @@ struct FSiteTransfer
     bool bYardReleased=false, bRMGReserved=false, bParkingDeparture=false;
     bool bYardAdvanceBooking=false; // next service only; cannot enter the road to the RMG
     double TrafficWaitSeconds=0, YardWaitSeconds=0, LastRerouteAt=-10;
+    FString IncidentRoadCause;
+    int32 IncidentRerouteStage=INDEX_NONE;
+    bool bWaitForIncidentAtBay=false;
     double DispatchRetryAfter=0;
     int32 Reroutes=0;
     int32 ReturnSTS=INDEX_NONE, ReturnCargo=INDEX_NONE;
@@ -231,6 +236,13 @@ private:
     friend class FIncidentScenarioTest;
     friend class FIncidentExtensionTest;
     friend class FIncidentTimingTest;
+    friend class FEquipmentPerformanceTest;
+    TMap<FString,double> EquipmentWorkingSeconds;
+    FPortBerthPerformance BerthPerformance[3];
+    void ResetEquipmentPerformance();
+    void AdvanceEquipmentPerformance(float Dt,bool Paused);
+    TSharedPtr<FJsonObject> CaptureEquipmentPerformance(const AActor* Actor) const;
+    TSharedPtr<FJsonObject> CaptureBerthPerformance(int32 Berth) const;
     TArray<FPortIncidentRun> IncidentRuns;
     double IncidentClock=0;
     double IncidentMeasureClock=0,IncidentHaltSeconds=0;
@@ -245,6 +257,7 @@ private:
     bool bIncidentInputUsed=false;
     bool ApplyIncidentCommand(const FJsonObject& Command,FString& Error);
     TMap<FString,FPortIncidentRoadClosure> IncidentRoadClosures;
+    double NextIncidentYardPlanAt=0.;
     TSet<int32> IncidentRouteWaiting;
     TMap<int32,double> IncidentNextRouteAttempt;
     TMap<FString,int32> IncidentBlockedYardSlots;
@@ -254,6 +267,16 @@ private:
     bool ExtendedIncidentObserved(const FString& Action,const APortAGVActor* V,const APortWorkingCrane* K) const;
     bool IncidentRoadBlocked(FVector A,FVector B,bool Record=false);
     bool HasIncidentRoadClosure() const;
+    FPortIncidentRoadClosure* FindIncidentRoadClosure(FVector From,FVector To,bool Record=false);
+    void SetAGVIncidentDriveFailure(int32 Lane,bool Failed,double ClearanceM,double RepairDelay);
+    void RefreshAGVIncidentControl();
+    bool HoldForIncidentRoad(int32 Lane,FVector From,FVector Target,float Dt);
+    void RerouteAroundIncident(int32 Lane);
+    FPortIncidentRoadClosure* LoadedDepartureIncident(int32 Lane);
+    void RecordIncidentDetour(int32 Lane,const FPortIncidentRoadClosure& Zone);
+    void ReleaseFutureRoadClaims(int32 VehicleID);
+    void ReassignIncidentPickup(int32 Lane);
+    bool StartRoadRoute(int32 Lane);
     bool ValidateIncidentStep(const FJsonObject& Command,FString& Error) const;
     void AdvanceIncidentScenarios(float Dt);
     TSharedPtr<FJsonObject> CaptureIncidentScenarios() const;
@@ -266,6 +289,7 @@ private:
     int32 RecoverySequence=0;
     void ProcessDashboardCommands();
     bool ApplyDashboardCommand(const FJsonObject& Command,FString& Error);
+    bool ApplyDashboardAction(const FJsonObject& Command,FString& Error);
     TSharedPtr<FJsonObject> CaptureEnvironment() const;
     void RecordRecoveryEvent(const FString& Kind,AActor* Cause,AActor* From,AActor* To,
         AActor* Cargo=nullptr,const FVector& OldPosition=FVector::ZeroVector,const FVector& NewPosition=FVector::ZeroVector);
@@ -305,6 +329,7 @@ private:
     bool ReplanBlockedYards();
     bool ReplanYardGroup(const TSet<int32>& Affected,const TSet<int32>& UnavailableSupports,AActor* Cause=nullptr);
     void ReleaseDeferredYardLeases();
+    bool NeedsSTSPickupRebind(int32 Vehicle) const;
     bool JobHeldByFailure(int32 Vehicle) const;
     // Export bookings retain their destination vessel/position separately from discharge jobs.
     TArray<FSiteShipCargo> ExportCargo;
@@ -396,7 +421,8 @@ private:
     bool PlanYardDestinations();
     bool PlanLegacyYardDestinations();
     void PrepareRoute(int32 Lane,bool Return);
-    bool PlanRoadRoute(int32 Lane,bool Congested,bool RequireClearDeparture=false);
+    bool PlanRoadRoute(int32 Lane,bool Congested,bool RequireClearDeparture=false,double MaxTravelCost=MAX_dbl,
+        bool UseApronBypass=false);
     TArray<FBox> BuildRoadCorridor(const APortAGVActor& Vehicle,FVector Target,
         const TArray<FVector>* Route,int32 Waypoint,int32 RouteEnd,bool LegacyYardEntry) const;
     int32 FindRoadCorridorBlocker(const APortAGVActor& Vehicle,FVector Target,

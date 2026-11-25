@@ -139,6 +139,7 @@ void FTerminalCheckpoint::Capture(APortAGVActor& O)
 {
     Values(O.bDriveFault,O.EmergencySettings,O.ActiveEmergencySettings,O.bEmergencyTestOverrides,O.Emergency,
         O.EmergencyWorkerPosition,O.EmergencyDirection,O.DynamicsSettings,O.Dynamics,O.Surface,O.Friction,O.WindVelocity);
+    Values(O.bIncidentRoadHold,O.bIncidentHandoverHold);
     Values(O.LastCurvaturePerCm,O.BatteryPercent,O.bNeedsCharge,O.bCharging,O.VehicleID,O.Speed,O.CompletedJobs,
         O.PayloadKg,O.ActiveDeckOffsetCm,O.DeckCoGOffsetCm,O.Sensors);
     Values(O.EmergencyCargo,O.OriginalEmergencyCoG,O.AppliedEmergencyCoG,O.DisplayedBattery,O.bDisplayedCharging,
@@ -167,6 +168,8 @@ void FTerminalCheckpoint::Capture(APortWorkingCrane& O)
 
 void FTerminalCheckpoint::Capture(APortSiteLogistics& O)
 {
+    Values(O.EquipmentWorkingSeconds,O.BerthPerformance);
+    Values(O.IncidentRoadClosures,O.IncidentRouteWaiting,O.IncidentNextRouteAttempt,O.NextIncidentYardPlanAt);
     Values(O.IncidentMeasureClock,O.IncidentHaltSeconds,O.IncidentCompletionTimes,O.bIncidentReferenceClean,
         O.IncidentEnvironmentRevision,O.IncidentComparisonKey,O.IncidentRuns,O.IncidentClock,O.bIncidentInputUsed);
     Values(O.FreeCargo,O.MovingCargo,O.FixedCargo,O.CargoBays,O.CargoBayIndex,O.CargoSources,
